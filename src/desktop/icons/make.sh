@@ -18,3 +18,6 @@ for name in pinger all-up losses outage no-network; do
     # Linux takes a PNG and scales it to its panel
     "$magick" -background none -density 768 "$name.svg" -filter Lanczos -resize 64x64 -strip "$name.png"
 done
+
+# the icon of the program, which go-winres makes the Windows resource of, see ../winres/winres.json
+"$magick" -background none -density 3072 pinger.svg -filter Lanczos -resize 256x256 -strip program.png

@@ -4,34 +4,63 @@ package main
 
 import (
 	"os"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
 
+// The program is a console one whose manifest asks Windows for no console when it is started from Explorer
+// (winres/app.manifest): there it is only the icon in the notification area, while cmd or PowerShell wait for it and
+// show what it writes, as for any command.
+
 var (
-	kernel32          = windows.NewLazySystemDLL("kernel32.dll")
-	procAttachConsole = kernel32.NewProc("AttachConsole")
-	procAllocConsole  = kernel32.NewProc("AllocConsole")
+	kernel32                  = windows.NewLazySystemDLL("kernel32.dll")
+	procAllocConsole          = kernel32.NewProc("AllocConsole")
+	procFreeConsole           = kernel32.NewProc("FreeConsole")
+	procGetConsoleWindow      = kernel32.NewProc("GetConsoleWindow")
+	procGetConsoleProcessList = kernel32.NewProc("GetConsoleProcessList")
 )
 
-// attachParentProcess is ATTACH_PARENT_PROCESS: the console of the process that started this one.
-const attachParentProcess = ^uintptr(0)
-
-// console tells whether the program writes to a console, and ownConsole whether it opened the console itself, which
-// closes with the program.
+// console tells whether the program writes to a console, and ownConsole whether that console is its own, opened
+// for it and closing with it.
 var console, ownConsole bool
 
-// openConsole gives the program, built without a console, one to write to: that of cmd or PowerShell it was started
-// from, or a window of its own where it was started otherwise. Closing that window stops the pinger.
-func openConsole() {
-	if r, _, _ := procAttachConsole.Call(attachParentProcess); r == 0 {
-		if r, _, _ := procAllocConsole.Call(); r == 0 {
+// setUpConsole keeps the console of the terminal the program was started from, and gives it one of its own where it
+// has none and is asked to keep to the console. A Windows older than 11 24H2 gives the program started from Explorer
+// a console of its own anyway, which it closes unless asked to keep to it.
+func setUpConsole(keep bool) {
+	has := hasConsole()
+	if has && alone() {
+		if !keep {
+			_, _, _ = procFreeConsole.Call()
 			return
 		}
 		ownConsole = true
 	}
-	console = true
+	if !has && keep {
+		if r, _, _ := procAllocConsole.Call(); r == 0 {
+			return
+		}
+		has, ownConsole = true, true
+		reopenStandardHandles()
+	}
+	console = has
+}
 
+func hasConsole() bool {
+	r, _, _ := procGetConsoleWindow.Call()
+	return r != 0
+}
+
+// alone tells whether the console has no other process but this one, that is, was made for it.
+func alone() bool {
+	var ids [2]uint32
+	n, _, _ := procGetConsoleProcessList.Call(uintptr(unsafe.Pointer(&ids[0])), uintptr(len(ids)))
+	return n == 1
+}
+
+// reopenStandardHandles points the standard handles at a console opened later than the program started.
+func reopenStandardHandles() {
 	if out, err := openDevice("CONOUT$"); err == nil {
 		os.Stdout, os.Stderr = out, out
 		_ = windows.SetStdHandle(windows.STD_OUTPUT_HANDLE, windows.Handle(out.Fd()))

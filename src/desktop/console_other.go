@@ -2,5 +2,5 @@
 
 package main
 
-// openConsole has nothing to do: the program writes to the console it was started from.
-func openConsole() {}
+// setUpConsole has nothing to do: the program writes to the terminal it was started from.
+func setUpConsole(bool) {}

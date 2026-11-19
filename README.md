@@ -57,7 +57,7 @@ read changes nothing, and the page says why.
 | `-data` | `watcher-pinger.json` next to the program | the file from Watcher NMS |
 | `-listen` | `127.0.0.1:47380` | where the page is served |
 | `-no-browser` | off | do not open the page |
-| `-console` | off | keep to the console instead of the icon: on Windows that of cmd or PowerShell it is started from, or a window of its own, which stops the pinger once closed |
+| `-console` | off | keep to the console instead of the icon: the terminal it is started from, where Ctrl+C stops it, or on Windows a console window of its own where it is started from Explorer |
 | `-timeout` | `1s` | how long to wait for a reply |
 | `-watched-interval` | `5s` | how often what is expanded on the page is pinged |
 | `-device-interval` | `30s` | how often the other devices of the network are pinged |
@@ -127,7 +127,7 @@ There is no need for Go on the machine, a container does:
 
 ```sh
 docker run --rm -v "$PWD:/src" -w /src -e GOOS=windows -e GOARCH=amd64 golang:1.27 \
-    go build -trimpath -ldflags "-s -w -H windowsgui" -o dist/watcher-pinger.exe ./src/desktop
+    go build -trimpath -ldflags "-s -w" -o dist/watcher-pinger.exe ./src/desktop
 ```
 
 Tests run in the container too; those of the ICMP helper only on Windows, built with
@@ -138,14 +138,16 @@ docker run --rm -v "$PWD:/src" -w /src golang:1.27 go test -race ./...
 docker run --rm -v "$PWD:/src" -w /src golangci/golangci-lint:v2.15.0 golangci-lint run ./...
 ```
 
-The icons are drawn in `src/desktop/icons/*.svg` and made into `.ico` files by `make.sh` there, with ImageMagick
-and librsvg. The icon of the program comes from `pinger.svg` through a Windows resource beside the code:
+The icons are drawn in `src/desktop/icons/*.svg` and made into `.ico` and `.png` files by `make.sh` there, with
+ImageMagick and librsvg. The program for Windows is a console one whose manifest
+([`src/desktop/winres/app.manifest`](src/desktop/winres/app.manifest)) asks for no console when it is started from
+Explorer, so that it is only the icon there, while cmd or PowerShell wait for it, show what it writes and stop it on
+Ctrl+C. Windows older than 11 24H2 do not know the setting and give it a console anyway, which it closes at once: a
+window flashes at the start, nothing else. The manifest and the icon of the program go into a Windows resource beside
+the code:
 
 ```sh
-magick -background none -density 3072 src/desktop/icons/pinger.svg -filter Lanczos -resize 256x256 dist/pinger-256.png
-cd src/desktop && go run github.com/tc-hib/go-winres@v0.3.3 simply --icon ../../dist/pinger-256.png --manifest gui \
-    --product-name "Watcher Pinger" --file-description "Watcher Pinger" --original-filename watcher-pinger.exe \
-    --arch amd64 --out rsrc
+cd src/desktop && go run github.com/tc-hib/go-winres@v0.3.3 make --in winres/winres.json --arch amd64 --out rsrc
 ```
 
 The image of the server:

@@ -116,12 +116,12 @@ jobs:
         run: |
           echo "version=$(git describe --tags --always --dirty)" >> "$GITHUB_OUTPUT"
 
-      # Windows without a console, with the icon in the notification area; Linux in the console
+      # a console program on both; on Windows its manifest gives it no console when started from Explorer
       - name: Build
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w -H windowsgui -X main.version=${VERSION}" \
+          GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
             -o dist/watcher-pinger.exe ./src/desktop
           GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
             -o dist/watcher-pinger ./src/desktop

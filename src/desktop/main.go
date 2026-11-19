@@ -55,9 +55,7 @@ func main() {
 	showVersion := flag.Bool("version", false, "tell the version and stop")
 	flag.Parse()
 
-	if *inConsole {
-		openConsole()
-	}
+	setUpConsole(*inConsole)
 	if *showVersion {
 		tell("Watcher Pinger " + version)
 		return

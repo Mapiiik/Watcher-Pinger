@@ -10,8 +10,8 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// The program has no console unless -console gives it one, so what it has to say otherwise comes in a window of its
-// own.
+// Started from Explorer the program has no console, so what it has to say comes in a window of its own; started from
+// a terminal it writes there.
 
 // tell shows a message and waits for its OK, or writes it to the console.
 func tell(text string) {
