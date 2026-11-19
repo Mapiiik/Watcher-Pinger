@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Watcher Pinger</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header>
+  <h1>Watcher Pinger</h1>
+  <nav id="views" class="segmented">
+    <button type="button" data-view="network"></button>
+    <button type="button" data-view="customers"></button>
+  </nav>
+  <input id="search" type="search" autocomplete="off" spellcheck="false">
+  <nav id="filters" class="segmented">
+    <button type="button" data-filter="all" data-text="filterAll"></button>
+    <button type="button" data-filter="outages" data-text="filterOutages"></button>
+    <button type="button" data-filter="loss" data-text="filterLoss"></button>
+  </nav>
+  <button id="expand-filtered" type="button"></button>
+  <button id="collapse-all" type="button" data-text="collapseAll"></button>
+  <span id="totals"></span>
+</header>
+<div id="meta"></div>
+<main id="tree"></main>
+<main id="results" hidden></main>
+<div id="toast" hidden></div>
+<div id="stale" hidden>
+  <div class="stale-box" role="alert">
+    <div class="stale-icon" aria-hidden="true">!</div>
+    <strong data-text="staleTitle"></strong>
+    <p data-text="staleText"></p>
+    <p id="stale-since"></p>
+  </div>
+</div>
+<script src="app.js"></script>
+</body>
+</html>
