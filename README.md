@@ -13,7 +13,7 @@ technician standing in it has the last copy on their own computer.
 ## Using it
 
 1. Download `watcher-pinger.exe` from the [releases](https://github.com/Mapiiik/Watcher-Pinger/releases).
-2. In Watcher NMS, **Access Points → Watcher Pinger (.json)** downloads `watcher-pinger.json`; put it next to
+2. In Watcher NMS, **Access Points → Pinger → Download (.json)** gives `watcher-pinger.json`; put it next to
    `watcher-pinger.exe` (a synchronised folder kept available offline does well).
 3. Run `watcher-pinger.exe`. The page opens in the default browser; closing the console window stops the pinger.
 
