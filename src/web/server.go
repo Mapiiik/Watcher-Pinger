@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"slices"
 	"time"
 
 	"watcher-pinger/src/addressbook"
@@ -34,6 +35,8 @@ type Server struct {
 	// Heartbeat is how long the page goes without a message at most, so that it can tell a quiet network from a
 	// pinger that is gone.
 	Heartbeat time.Duration
+	// Identity tells the page who is signed in and where they sign out, nil where nobody signs in.
+	Identity func(r *http.Request) (user, signOut string)
 }
 
 // New serves the given book and the states its monitor keeps.
@@ -47,9 +50,10 @@ func New(book *addressbook.Book, monitor Monitor, dataFile string) *Server {
 	}
 }
 
-// Handler answers requests for the given host only. The server listens on the loopback, and a page of another site
-// that had its name point there would otherwise be answered too.
-func (s *Server) Handler(host string) http.Handler {
+// Handler answers requests for the given hosts only, any host where none is given. A pinger on the loopback would
+// otherwise answer a page of another site that had its name point there. The guard, where there is one, stands
+// between the check of the host and the page.
+func (s *Server) Handler(hosts []string, guard func(http.Handler) http.Handler) http.Handler {
 	files, err := fs.Sub(static, "static")
 	if err != nil {
 		panic(err)
@@ -58,17 +62,36 @@ func (s *Server) Handler(host string) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET /", http.FileServerFS(files))
 	mux.HandleFunc("GET /api/book", s.handleBook)
+	mux.HandleFunc("GET /api/session", s.handleSession)
 	mux.HandleFunc("GET /api/events", s.handleEvents)
 	mux.HandleFunc("POST /api/watch", s.handleWatch)
 
+	var page http.Handler = mux
+	if guard != nil {
+		page = guard(mux)
+	}
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Host != host {
+		if len(hosts) > 0 && !slices.Contains(hosts, r.Host) {
 			http.Error(w, "unknown host", http.StatusForbidden)
 			return
 		}
 		w.Header().Set("Cache-Control", "no-store")
-		mux.ServeHTTP(w, r)
+		page.ServeHTTP(w, r)
 	})
+}
+
+// handleSession tells the page who is signed in, so that it can show them and offer to sign out. The page also asks
+// it once the states stop coming: a session run out answers 401, a pinger gone does not answer at all.
+func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
+	var session struct {
+		User    string `json:"user,omitempty"`
+		SignOut string `json:"signOut,omitempty"`
+	}
+	if s.Identity != nil {
+		session.User, session.SignOut = s.Identity(r)
+	}
+	writeJSON(w, session)
 }
 
 func (s *Server) handleBook(w http.ResponseWriter, _ *http.Request) {

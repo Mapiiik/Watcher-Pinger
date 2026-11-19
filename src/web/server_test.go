@@ -49,7 +49,7 @@ func serve(t *testing.T, m Monitor) (*httptest.Server, string) {
 	book := &addressbook.Book{Format: addressbook.Format, Version: 1}
 	server := httptest.NewUnstartedServer(nil)
 	host := server.Listener.Addr().String()
-	server.Config.Handler = New(book, m, "data.json").Handler(host)
+	server.Config.Handler = New(book, m, "data.json").Handler([]string{host}, nil)
 	server.Start()
 	t.Cleanup(server.Close)
 
@@ -147,7 +147,7 @@ func TestAQuietStreamStillBeats(t *testing.T) {
 	handler := New(book, &fakeMonitor{}, "data.json")
 	handler.Interval = 10 * time.Millisecond
 	handler.Heartbeat = 50 * time.Millisecond
-	server.Config.Handler = handler.Handler(host)
+	server.Config.Handler = handler.Handler([]string{host}, nil)
 	server.Start()
 	t.Cleanup(server.Close)
 

@@ -92,7 +92,7 @@ func main() {
 	url := "http://" + host + "/"
 
 	server := &http.Server{
-		Handler:           web.New(book, pings, *data).Handler(host),
+		Handler:           web.New(book, pings, *data).Handler([]string{host}, nil),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {
