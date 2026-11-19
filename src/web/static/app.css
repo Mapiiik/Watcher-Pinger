@@ -142,7 +142,11 @@ button .down { color: var(--down); font-weight: 600; }
 @media (prefers-reduced-motion: reduce) {
   #stale, .stale-box, .stale-icon { animation: none; }
 }
-#meta { padding: 4px 16px; color: var(--muted); font-size: 12px; }
+#meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 4px 16px; color: var(--muted); font-size: 12px; }
+#meta button { padding: 1px 8px; font-size: 12px; }
+#reload-result.failed { color: var(--down); }
+#session { margin-left: auto; color: var(--muted); white-space: nowrap; }
+#session a { color: inherit; }
 main { padding: 0 16px 24px; }
 
 .ap-head, .host, .result-ap {

@@ -122,7 +122,7 @@ func TestOnlyWhatChangedIsHandedOut(t *testing.T) {
 
 func TestWatchedAddressesGoFirst(t *testing.T) {
 	m := New(newScript(), []string{"10.0.0.1", "10.0.0.2", "10.0.0.3"}, nil, DefaultOptions)
-	m.Watch([]string{"10.0.0.3"})
+	m.Watch("page", []string{"10.0.0.3"})
 
 	due := m.due(2)
 	if len(due) != 2 || due[0].ip.String() != "10.0.0.3" {
@@ -169,7 +169,7 @@ func TestAfterTheFirstPingTheNextComesAnywhereWithinTheInterval(t *testing.T) {
 func TestEachKindOfAddressHasItsInterval(t *testing.T) {
 	m := New(newScript(), []string{"10.0.0.1", "10.0.0.2", "10.0.0.3"}, []string{"10.0.0.2", "10.0.0.3"},
 		DefaultOptions)
-	m.Watch([]string{"10.0.0.3"})
+	m.Watch("page", []string{"10.0.0.3"})
 
 	for ip, want := range map[string]time.Duration{
 		"10.0.0.1": DefaultOptions.IdleInterval,
@@ -187,7 +187,7 @@ func TestAnAddressWatchedAnewIsPingedAtOnce(t *testing.T) {
 	tg := m.targets["10.0.0.1"]
 	tg.due = m.now().Add(time.Hour)
 
-	m.Watch([]string{"10.0.0.1"})
+	m.Watch("page", []string{"10.0.0.1"})
 
 	if tg.due.After(m.now()) {
 		t.Errorf("due %v, want now", tg.due)
@@ -222,4 +222,58 @@ func TestRunPingsEveryAddress(t *testing.T) {
 
 	cancel()
 	<-done
+}
+
+// Two pages open watch what either of them shows, and a page closed stops watching.
+func TestWhatAnyViewerWatchesIsWatched(t *testing.T) {
+	m := New(newScript(), []string{"10.0.0.1", "10.0.0.2", "10.0.0.3"}, nil, DefaultOptions)
+
+	m.Watch("first", []string{"10.0.0.1"})
+	m.Watch("second", []string{"10.0.0.2"})
+	watched := func() map[string]bool {
+		got := map[string]bool{}
+		for ip, tg := range m.targets {
+			if tg.watched {
+				got[ip] = true
+			}
+		}
+		return got
+	}
+	if got := watched(); len(got) != 2 || !got["10.0.0.1"] || !got["10.0.0.2"] {
+		t.Fatalf("watched %v, want what both pages show", got)
+	}
+
+	m.Watch("first", []string{"10.0.0.3"})
+	m.Forget("second")
+	if got := watched(); len(got) != 1 || !got["10.0.0.3"] {
+		t.Errorf("watched %v, want what the first page shows now", got)
+	}
+}
+
+// New data keep what was learned of the addresses that stay, ping the new ones right away and drop the rest.
+func TestNewDataKeepWhatStays(t *testing.T) {
+	m := New(newScript(), []string{"10.0.0.1", "10.0.0.2"}, []string{"10.0.0.2"}, DefaultOptions)
+	m.Watch("page", []string{"10.0.0.3"})
+	kept := m.targets["10.0.0.1"]
+	m.record(kept, time.Millisecond, true, nil)
+	kept.due = m.now().Add(time.Hour)
+
+	m.Replace([]string{"10.0.0.1", "10.0.0.3"}, []string{"10.0.0.1"})
+
+	if m.targets["10.0.0.1"] != kept || kept.state.Status != Up || kept.state.Sent != 1 {
+		t.Errorf("the address kept lost what was learned: %+v", kept.state)
+	}
+	if !kept.device {
+		t.Error("the address kept is not a device now")
+	}
+	if _, ok := m.targets["10.0.0.2"]; ok {
+		t.Error("the address left out is still pinged")
+	}
+	added := m.targets["10.0.0.3"]
+	if added == nil || added.due.After(m.now()) || !added.watched {
+		t.Errorf("the new address is not due now and watched: %+v", added)
+	}
+	if all, _ := m.Snapshot(); len(all) != 2 {
+		t.Errorf("%d states, want the two addresses pinged now", len(all))
+	}
 }

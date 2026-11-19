@@ -68,6 +68,8 @@ func run(ctx context.Context, cfg Config) error {
 	go pings.Run(ctx)
 
 	page := web.New(book, pings, cfg.DataFile)
+	page.Hosted = true
+	page.Reload = func(context.Context) (*addressbook.Book, error) { return addressbook.Load(cfg.DataFile) }
 	page.Identity = func(r *http.Request) (string, string) {
 		user, ok := auth.FromContext(r.Context())
 		if !ok {

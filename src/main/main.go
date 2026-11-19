@@ -91,8 +91,11 @@ func main() {
 	host := listener.Addr().String()
 	url := "http://" + host + "/"
 
+	page := web.New(book, pings, *data)
+	// a new file from Watcher NMS is read on a click on the page, without starting the pinger again
+	page.Reload = func(context.Context) (*addressbook.Book, error) { return addressbook.Load(*data) }
 	server := &http.Server{
-		Handler:           web.New(book, pings, *data).Handler([]string{host}, nil),
+		Handler:           page.Handler([]string{host}, nil),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	go func() {

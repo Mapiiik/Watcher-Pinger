@@ -23,8 +23,13 @@
   <button id="expand-filtered" type="button"></button>
   <button id="collapse-all" type="button" data-text="collapseAll"></button>
   <span id="totals"></span>
+  <span id="session" hidden><span id="user"></span> <a id="sign-out" data-text="signOut"></a></span>
 </header>
-<div id="meta"></div>
+<div id="meta">
+  <span id="generated"></span>
+  <button id="reload" type="button" data-text="reload" hidden></button>
+  <span id="reload-result"></span>
+</div>
 <main id="tree"></main>
 <main id="results" hidden></main>
 <div id="toast" hidden></div>

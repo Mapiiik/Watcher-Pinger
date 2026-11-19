@@ -133,6 +133,8 @@ type Monitor struct {
 	mu      sync.Mutex
 	targets map[string]*target
 	version uint64
+	// viewers are the pages open, each with the addresses it shows
+	viewers map[string]map[string]bool
 }
 
 // New pings the given addresses, the devices of the network among them, none of them pinged yet.
@@ -141,17 +143,34 @@ func New(pinger Pinger, ips []string, devices []string, options Options) *Monito
 		pinger:  pinger,
 		options: options,
 		now:     time.Now,
-		targets: make(map[string]*target, len(ips)),
+		viewers: make(map[string]map[string]bool),
 	}
+	m.Replace(ips, devices)
+	return m
+}
+
+// Replace pings the given addresses from now on, the devices of the network among them. An address kept keeps its
+// state and the pings it has had, a new one is pinged right away and one left out is no longer pinged.
+func (m *Monitor) Replace(ips []string, devices []string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	targets := make(map[string]*target, len(ips))
 	for _, ip := range ips {
-		m.targets[ip] = &target{ip: net.ParseIP(ip)}
+		if t, ok := m.targets[ip]; ok {
+			t.device = false
+			targets[ip] = t
+		} else {
+			targets[ip] = &target{ip: net.ParseIP(ip)}
+		}
 	}
 	for _, ip := range devices {
-		if t, ok := m.targets[ip]; ok {
+		if t, ok := targets[ip]; ok {
 			t.device = true
 		}
 	}
-	return m
+	m.targets = targets
+	m.rewatch()
 }
 
 // Run pings until ctx ends.
@@ -299,9 +318,9 @@ func (m *Monitor) record(t *target, rtt time.Duration, ok bool, err error) {
 	t.state = next
 }
 
-// Watch makes the given addresses the watched ones, pinged more often, and the others idle. An address watched anew is
-// pinged right away.
-func (m *Monitor) Watch(ips []string) {
+// Watch makes the given addresses the ones a viewer, a page open, watches. What any viewer watches is pinged more often
+// than the rest, and an address watched anew is pinged right away.
+func (m *Monitor) Watch(viewer string, ips []string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -309,11 +328,31 @@ func (m *Monitor) Watch(ips []string) {
 	for _, ip := range ips {
 		watched[ip] = true
 	}
+	m.viewers[viewer] = watched
+	m.rewatch()
+}
 
+// Forget stops watching what a viewer watched, once its page is closed.
+func (m *Monitor) Forget(viewer string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	delete(m.viewers, viewer)
+	m.rewatch()
+}
+
+// rewatch marks what any viewer watches. The caller holds the lock.
+func (m *Monitor) rewatch() {
 	now := m.now()
 	for ip, t := range m.targets {
 		was := t.watched
-		t.watched = watched[ip]
+		t.watched = false
+		for _, watched := range m.viewers {
+			if watched[ip] {
+				t.watched = true
+				break
+			}
+		}
 		if t.watched && !was && t.due.After(now) {
 			t.due = now
 		}

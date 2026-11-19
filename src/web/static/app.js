@@ -31,6 +31,12 @@ const TEXTS = {
     staleTitle: 'The states shown are not current',
     staleText: 'The page has lost the pinger. If its window was closed, start Watcher Pinger again.',
     staleSince: 'Last heard from it at {0}.',
+    staleTextHosted: 'The page has lost the server and keeps trying to reach it.',
+    reload: 'Reload data',
+    reloading: 'Reading…',
+    reloaded: 'Read anew at {0}.',
+    reloadFailed: 'The data were not read, the old ones stay: {0}',
+    signOut: 'Sign out',
     copied: 'Copied: {0}',
     noResults: 'Nothing found.',
     tooMany: 'The first {0} addresses are shown.',
@@ -63,6 +69,12 @@ const TEXTS = {
     staleTitle: 'Zobrazené stavy nejsou aktuální',
     staleText: 'Stránka ztratila spojení s pingerem. Pokud bylo jeho okno zavřené, spusťte Watcher Pinger znovu.',
     staleSince: 'Naposledy se ozval v {0}.',
+    staleTextHosted: 'Stránka ztratila spojení se serverem a zkouší se k němu znovu připojit.',
+    reload: 'Načíst data znovu',
+    reloading: 'Načítám…',
+    reloaded: 'Načteno znovu v {0}.',
+    reloadFailed: 'Data se nenačetla, zůstávají původní: {0}',
+    signOut: 'Odhlásit',
     copied: 'Zkopírováno: {0}',
     noResults: 'Nic nenalezeno.',
     tooMany: 'Zobrazeno prvních {0} adres.',
@@ -92,6 +104,9 @@ const VIEWS = {
 
 const MAX_RESULTS = 300;
 const STORAGE_KEY = 'watcher-pinger';
+
+// The page among others open on the same pinger: each watches what it shows.
+const VIEWER = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
 const treeEl = document.getElementById('tree');
 const resultsEl = document.getElementById('results');
@@ -130,6 +145,10 @@ function addHost(node, host) {
 }
 
 function buildModel(book) {
+  nodes.length = 0;
+  roots.length = 0;
+  rowsByIp.clear();
+  headers.clear();
   const byId = new Map();
   for (const ap of book.accessPoints) {
     const node = makeNode(ap.id, ap.name, ap.parentId ? byId.get(ap.parentId) : null);
@@ -491,7 +510,7 @@ function sendWatch() {
   for (const node of headers) {
     if (node.open[view] && node.head.isConnected) VIEWS[view](node).forEach((host) => ips.add(host.ip));
   }
-  fetch('api/watch', { method: 'POST', body: JSON.stringify([...ips]) }).catch(() => {});
+  fetch(`api/watch?viewer=${VIEWER}`, { method: 'POST', body: JSON.stringify([...ips]) }).catch(() => {});
 }
 
 // The pinger sends something every two seconds at least. Without it for longer, or with the connection lost, what the
@@ -510,11 +529,27 @@ function checkStale() {
   overlay.hidden = !stale;
 }
 
+// The stream of the states. The browser opens it again by itself after a lost connection, but not after a refusal: a
+// session run out sends the page to sign in again, a server shutting down is tried again a little later.
+let source = null;
+let opened = false;
+
 function listen() {
-  const source = new EventSource('api/events');
+  source = new EventSource(`api/events?viewer=${VIEWER}`);
+  // What the page shows is watched only while its stream is open, so it is told again with every new one. A stream
+  // opened again may be that of a pinger started again, with other data, which are read again for that reason.
+  source.onopen = () => {
+    if (opened) queueBook();
+    opened = true;
+    sendWatch();
+  };
   source.onerror = () => {
     connected = false;
     checkStale();
+    if (source.readyState === EventSource.CLOSED) {
+      source = null;
+      checkSession().finally(() => setTimeout(() => { if (!source) listen(); }, 3000));
+    }
   };
   source.onmessage = (event) => {
     connected = true;
@@ -526,7 +561,23 @@ function listen() {
     scheduleRepaint();
     checkStale();
   };
-  setInterval(checkStale, 1000);
+  // new data, read on this page or another one, or fetched by the server
+  source.addEventListener('book', () => {
+    lastMessage = Date.now();
+    queueBook();
+  });
+}
+
+async function checkSession() {
+  try {
+    const response = await fetch('api/session');
+    if (response.status === 401) {
+      const { signIn } = await response.json();
+      location.assign(`${signIn}?return=${encodeURIComponent(location.pathname + location.search)}`);
+    }
+  } catch (e) {
+    // the pinger does not answer, the page stays covered
+  }
 }
 
 // --- search ------------------------------------------------------------------------------------------------------
@@ -664,21 +715,75 @@ setInterval(() => {
   }
 }, 15000);
 
+// Reads the data and builds the trees. Data read anew keep what was expanded and what is searched for.
+async function readBook(first) {
+  const response = await fetch('api/book');
+  const { book, dataFile, canReload, hosted } = await response.json();
+  document.getElementById('generated').textContent =
+    text('generated', new Date(book.generated).toLocaleString(), dataFile);
+  document.getElementById('reload').hidden = !canReload;
+  document.querySelector('#stale [data-text="staleText"]').textContent =
+    text(hosted ? 'staleTextHosted' : 'staleText');
+
+  const open = Object.fromEntries(Object.keys(VIEWS).map(
+    (name) => [name, new Set(nodes.filter((n) => n.open[name]).map((n) => n.id))]));
+  buildModel(book);
+  if (first) {
+    restore();
+  } else {
+    for (const name of Object.keys(VIEWS)) nodes.forEach((n) => { n.open[name] = open[name].has(n.id); });
+  }
+  recount();
+  renderTree();
+  if (searchEl.value.trim()) showSearch(searchEl.value);
+  else scheduleWatch();
+}
+
+let bookQueue = Promise.resolve();
+
+function queueBook() {
+  bookQueue = bookQueue.then(() => readBook(false)).catch(() => {});
+}
+
+document.getElementById('reload').addEventListener('click', async (event) => {
+  const button = event.currentTarget;
+  const result = document.getElementById('reload-result');
+  button.disabled = true;
+  result.className = '';
+  result.textContent = text('reloading');
+  try {
+    const response = await fetch('api/reload', { method: 'POST' });
+    const answer = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(answer.error || response.statusText);
+    // the stream tells every page open, this one too, to read the new data
+    result.textContent = text('reloaded', new Date().toLocaleTimeString());
+  } catch (e) {
+    result.className = 'failed';
+    result.textContent = text('reloadFailed', e.message);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+async function showSession() {
+  const session = await fetch('api/session').then((r) => r.json()).catch(() => ({}));
+  if (!session.user) return;
+  document.getElementById('user').textContent = session.user;
+  const signOut = document.getElementById('sign-out');
+  if (session.signOut) signOut.href = session.signOut;
+  else signOut.remove();
+  document.getElementById('session').hidden = false;
+}
+
 async function start() {
   document.querySelectorAll('[data-text]').forEach((element) => { element.textContent = text(element.dataset.text); });
   searchEl.placeholder = text('search');
   document.documentElement.lang = LANGUAGE;
 
-  const response = await fetch('api/book');
-  const { book, dataFile } = await response.json();
-  document.getElementById('meta').textContent = text('generated', new Date(book.generated).toLocaleString(), dataFile);
-
-  buildModel(book);
-  restore();
-  recount();
-  renderTree();
-  sendWatch();
+  await readBook(true);
+  showSession();
   listen();
+  setInterval(checkStale, 1000);
 }
 
 start();

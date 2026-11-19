@@ -3,12 +3,15 @@
 package web
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
 	"fmt"
 	"io/fs"
 	"net/http"
 	"slices"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"watcher-pinger/src/addressbook"
@@ -22,14 +25,23 @@ var static embed.FS
 type Monitor interface {
 	Snapshot() (map[string]monitor.State, uint64)
 	Since(version uint64) (map[string]monitor.State, uint64)
-	Watch(ips []string)
+	Watch(viewer string, ips []string)
+	Forget(viewer string)
+	Replace(ips []string, devices []string)
 }
 
 // Server answers the page.
 type Server struct {
-	book     *addressbook.Book
+	book     atomic.Pointer[addressbook.Book]
+	books    atomic.Uint64
 	monitor  Monitor
 	dataFile string
+
+	// streams counts the streams open for each viewer, a page open
+	streamsMu sync.Mutex
+	streams   map[string]int
+	reloadMu  sync.Mutex
+
 	// Interval is how often the page is sent what changed.
 	Interval time.Duration
 	// Heartbeat is how long the page goes without a message at most, so that it can tell a quiet network from a
@@ -37,17 +49,30 @@ type Server struct {
 	Heartbeat time.Duration
 	// Identity tells the page who is signed in and where they sign out, nil where nobody signs in.
 	Identity func(r *http.Request) (user, signOut string)
+	// Reload reads the data anew when the page asks for it, nil where it cannot.
+	Reload func(ctx context.Context) (*addressbook.Book, error)
+	// Hosted tells the page it is served by a server rather than by the pinger of the one looking at it.
+	Hosted bool
 }
 
 // New serves the given book and the states its monitor keeps.
 func New(book *addressbook.Book, monitor Monitor, dataFile string) *Server {
-	return &Server{
-		book:      book,
+	s := &Server{
 		monitor:   monitor,
 		dataFile:  dataFile,
+		streams:   make(map[string]int),
 		Interval:  250 * time.Millisecond,
 		Heartbeat: 2 * time.Second,
 	}
+	s.book.Store(book)
+	return s
+}
+
+// SetBook makes the given book the one pinged and shown, and tells the pages open to read it.
+func (s *Server) SetBook(book *addressbook.Book) {
+	s.book.Store(book)
+	s.monitor.Replace(book.IPs(), book.DeviceIPs())
+	s.books.Add(1)
 }
 
 // Handler answers requests for the given hosts only, any host where none is given. A pinger on the loopback would
@@ -65,6 +90,7 @@ func (s *Server) Handler(hosts []string, guard func(http.Handler) http.Handler) 
 	mux.HandleFunc("GET /api/session", s.handleSession)
 	mux.HandleFunc("GET /api/events", s.handleEvents)
 	mux.HandleFunc("POST /api/watch", s.handleWatch)
+	mux.HandleFunc("POST /api/reload", s.handleReload)
 
 	var page http.Handler = mux
 	if guard != nil {
@@ -96,13 +122,36 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleBook(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, struct {
-		DataFile string            `json:"dataFile"`
-		Book     *addressbook.Book `json:"book"`
-	}{s.dataFile, s.book})
+		DataFile  string            `json:"dataFile"`
+		Book      *addressbook.Book `json:"book"`
+		CanReload bool              `json:"canReload"`
+		Hosted    bool              `json:"hosted"`
+	}{s.dataFile, s.book.Load(), s.Reload != nil, s.Hosted})
+}
+
+// handleReload reads the data anew. Data that cannot be read change nothing, and the page is told why.
+func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
+	if s.Reload == nil {
+		http.Error(w, "the data cannot be read anew here", http.StatusNotFound)
+		return
+	}
+	s.reloadMu.Lock()
+	defer s.reloadMu.Unlock()
+
+	book, err := s.Reload(r.Context())
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	s.SetBook(book)
+	writeJSON(w, map[string]any{"generated": book.Generated})
 }
 
 // handleEvents sends every state first and then, at each interval, the ones that changed, or nothing at all once a
-// heartbeat has passed without a change.
+// heartbeat has passed without a change. New data are told as an event of their own, for the page to read them. The
+// stream belongs to a viewer, whose watched addresses are forgotten once its last stream is closed.
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -111,12 +160,23 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/event-stream")
 
+	viewer := r.URL.Query().Get("viewer")
+	s.open(viewer)
+	defer s.close(viewer)
+
 	states, version := s.monitor.Snapshot()
+	books := s.books.Load()
 	ticker := time.NewTicker(s.Interval)
 	defer ticker.Stop()
 	var sent time.Time
 
 	for {
+		if b := s.books.Load(); b != books {
+			books = b
+			if _, err := fmt.Fprint(w, "event: book\ndata: {}\n\n"); err != nil {
+				return
+			}
+		}
 		if len(states) > 0 || time.Since(sent) >= s.Heartbeat {
 			payload, err := json.Marshal(encode(states))
 			if err != nil {
@@ -125,9 +185,9 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 			if _, err := fmt.Fprintf(w, "data: %s\n\n", payload); err != nil {
 				return
 			}
-			flusher.Flush()
 			sent = time.Now()
 		}
+		flusher.Flush()
 
 		select {
 		case <-r.Context().Done():
@@ -138,13 +198,41 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// open counts a stream of the viewer.
+func (s *Server) open(viewer string) {
+	s.streamsMu.Lock()
+	defer s.streamsMu.Unlock()
+	s.streams[viewer]++
+}
+
+// close counts a stream of the viewer off, and forgets what it watched with its last one.
+func (s *Server) close(viewer string) {
+	s.streamsMu.Lock()
+	defer s.streamsMu.Unlock()
+	s.streams[viewer]--
+	if s.streams[viewer] <= 0 {
+		delete(s.streams, viewer)
+		s.monitor.Forget(viewer)
+	}
+}
+
+// handleWatch takes what a viewer shows. A viewer without a stream open is not believed, as nothing would ever forget
+// what it watches; the page sends it again once its stream opens.
 func (s *Server) handleWatch(w http.ResponseWriter, r *http.Request) {
 	var ips []string
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&ips); err != nil {
 		http.Error(w, "a list of addresses expected", http.StatusBadRequest)
 		return
 	}
-	s.monitor.Watch(ips)
+	viewer := r.URL.Query().Get("viewer")
+
+	s.streamsMu.Lock()
+	open := s.streams[viewer] > 0
+	if open {
+		s.monitor.Watch(viewer, ips)
+	}
+	s.streamsMu.Unlock()
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
