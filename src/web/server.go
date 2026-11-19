@@ -6,6 +6,7 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"net/http"
@@ -135,18 +136,36 @@ func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "the data cannot be read anew here", http.StatusNotFound)
 		return
 	}
-	s.reloadMu.Lock()
-	defer s.reloadMu.Unlock()
-
-	book, err := s.Reload(r.Context())
+	book, err := s.ReloadNow(r.Context())
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusUnprocessableEntity)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
-	s.SetBook(book)
 	writeJSON(w, map[string]any{"generated": book.Generated})
+}
+
+// ReloadNow reads the data anew and makes them the ones pinged and shown, one reading at a time. Data that cannot be
+// read change nothing.
+func (s *Server) ReloadNow(ctx context.Context) (*addressbook.Book, error) {
+	if s.Reload == nil {
+		return nil, errors.New("the data cannot be read anew here")
+	}
+	s.reloadMu.Lock()
+	defer s.reloadMu.Unlock()
+
+	book, err := s.Reload(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.SetBook(book)
+	return book, nil
+}
+
+// Book is the book pinged and shown now.
+func (s *Server) Book() *addressbook.Book {
+	return s.book.Load()
 }
 
 // handleEvents sends every state first and then, at each interval, the ones that changed, or nothing at all once a

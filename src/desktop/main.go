@@ -1,9 +1,9 @@
 // Watcher Pinger pings the network Watcher NMS knows and shows it as a tree in the browser. It runs from a file
-// handed out by Watcher NMS, so that it works in a part of the network cut off from the rest.
+// handed out by Watcher NMS, so that it works in a part of the network cut off from the rest. On Windows it keeps an
+// icon in the notification area, coloured by how the network is, instead of a console window.
 package main
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -49,7 +49,7 @@ func main() {
 	flag.Parse()
 
 	if *showVersion {
-		fmt.Println("Watcher Pinger", version)
+		tell("Watcher Pinger " + version)
 		return
 	}
 
@@ -92,27 +92,46 @@ func main() {
 	url := "http://" + host + "/"
 
 	page := web.New(book, pings, *data)
-	// a new file from Watcher NMS is read on a click on the page, without starting the pinger again
+	// a new file from Watcher NMS is read on a click, without starting the pinger again
 	page.Reload = func(context.Context) (*addressbook.Book, error) { return addressbook.Load(*data) }
 	server := &http.Server{
 		Handler:           page.Handler([]string{host}, nil),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+	stopped := make(chan error, 1)
 	go func() {
-		<-ctx.Done()
-		_ = server.Close()
+		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			stopped <- err
+		}
 	}()
 
 	fmt.Printf("Watcher Pinger %s is pinging %d addresses from %s\n", version, len(book.IPs()), *data)
-	fmt.Printf("The page is at %s, closing this window stops it.\n", url)
+	d := &desktop{url: url, page: page, pings: pings, stopped: stopped}
 	if !*noBrowser {
-		if err := openBrowser(url); err != nil {
-			fmt.Printf("Cannot open the browser: %v\n", err)
-		}
+		d.openPage()
 	}
 
-	if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	err = d.run(ctx)
+	stop()
+	_ = server.Close()
+	if err != nil {
 		fail("The page stopped: %v", err)
+	}
+}
+
+// desktop is the pinger on the computer of the one looking at it: the page in the browser and, on Windows, the
+// icon in the notification area.
+type desktop struct {
+	url   string
+	page  *web.Server
+	pings *monitor.Monitor
+	// stopped tells why the page stopped being served
+	stopped <-chan error
+}
+
+func (d *desktop) openPage() {
+	if err := openBrowser(d.url); err != nil {
+		tell(fmt.Sprintf("Cannot open the browser, the page is at %s: %v", d.url, err))
 	}
 }
 
@@ -141,12 +160,4 @@ func defaultDataFile() string {
 		return dataFileName
 	}
 	return filepath.Join(filepath.Dir(executable), dataFileName)
-}
-
-// fail tells what went wrong and waits, so that a window opened by a double click does not close before it is read.
-func fail(format string, args ...any) {
-	fmt.Fprintf(os.Stderr, format+"\n", args...)
-	fmt.Fprintln(os.Stderr, "Press Enter to close.")
-	_, _ = bufio.NewReader(os.Stdin).ReadString('\n')
-	os.Exit(1)
 }

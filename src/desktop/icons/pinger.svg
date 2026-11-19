@@ -1,0 +1,25 @@
+<!--
+  The icon of Watcher Pinger in the notification area, by the state of the network: the W as a ribbon under the
+  waves of a signal, as Watcher CRM and NMS have it, on a tile in the colour of the state. pinger.svg, blue, is the
+  icon of the program and of a pinger that has not heard from any device yet; the outage is a white tile with a red
+  edge, as red alone would be the tile of Watcher CRM and the outage has to stand out, to the colour-blind too.
+  The .ico files are made from these by make.sh, with ImageMagick and librsvg. The program icon of the .exe is made
+  from this one by go-winres, see the README.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect width="32" height="32" rx="7" fill="#2563eb"/>
+  <g transform="translate(16 16.1) scale(1.12) translate(-16 -16.2)">
+    <!-- the top of the outer wave is level with the tops of the W -->
+    <g fill="none" stroke="#fff" stroke-width="1.9">
+      <path d="M10.06 11.61A8.4 8.4 0 0 1 21.94 11.61"/>
+      <path d="M12.02 14.21A5.2 5.2 0 0 1 19.98 14.21"/>
+    </g>
+    <g fill="#fff" stroke="#fff" stroke-width="0.6" stroke-linejoin="round">
+      <path d="M15.8 17.9C16 16.8 16.9 16 17.9 15.9L19.96 19.4L24.58 8.5H27.94L21.4 22.9C21 23.8 19.3 23.9 18.8 22.9Z"/>
+      <path d="M4 8.5H7.4L11.2 18.1L9.5 21.1Z"/>
+    </g>
+    <!-- the ribbon crosses the strokes beside it, with a gap in the colour of the tile -->
+    <path d="M9.9 22C10 23.3 11.4 23.9 12.4 23.6C12.8 23.5 13 23.3 13.1 23.1L15.1 18.4C15.6 17.2 16.4 16.2 17.94 15.35C17 14.5 15 14.3 14.1 15.2C13.2 16 12.5 17 12 18Z" fill="#2563eb" stroke="#2563eb" stroke-width="1.35" stroke-linejoin="round"/>
+    <path d="M9.9 22C10 23.3 11.4 23.9 12.4 23.6C12.8 23.5 13 23.3 13.1 23.1L15.1 18.4C15.6 17.2 16.4 16.2 17.94 15.35C17 14.5 15 14.3 14.1 15.2C13.2 16 12.5 17 12 18Z" fill="#fff" stroke="#fff" stroke-width="0.6" stroke-linejoin="round"/>
+  </g>
+</svg>

@@ -3,6 +3,7 @@ module watcher-pinger
 go 1.27.3
 
 require (
+	fyne.io/systray v1.12.2
 	github.com/coreos/go-oidc/v3 v3.21.0
 	github.com/go-jose/go-jose/v4 v4.1.9
 	github.com/pires/go-proxyproto v0.12.0
@@ -12,4 +13,7 @@ require (
 	golang.org/x/sys v0.49.0
 )
 
-require golang.org/x/text v0.43.0 // indirect
+require (
+	github.com/godbus/dbus/v5 v5.1.0 // indirect
+	golang.org/x/text v0.43.0 // indirect
+)

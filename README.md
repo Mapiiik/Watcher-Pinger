@@ -16,7 +16,19 @@ too, for everyone who signs in to watch the network online.
 1. Download `watcher-pinger.exe` from the [releases](https://github.com/Mapiiik/Watcher-Pinger/releases).
 2. In Watcher NMS, **Access Points → Pinger → Download (.json)** gives `watcher-pinger.json`; put it next to
    `watcher-pinger.exe` (a synchronised folder kept available offline does well).
-3. Run `watcher-pinger.exe`. The page opens in the default browser; closing the console window stops the pinger.
+3. Run `watcher-pinger.exe`. The page opens in the default browser, and an icon in the notification area says how
+   the network is: a click opens the page again, its menu reads the data anew or quits the pinger.
+
+| Icon | |
+| --- | --- |
+| blue | nothing heard from a device yet, and the icon of the program |
+| green | the devices of the network answer |
+| orange | a device does not answer, or answers but loses more than 20 % of its last pings |
+| white with a red edge | an access point is out: none of its devices answers |
+| grey | no ping goes out, the pinger itself is cut off |
+
+Only the devices of the network count, as a router switched off at home is no fault of the network; its tooltip
+counts them. The outage stands apart by more than its colour, for the colour-blind and from the red of Watcher CRM.
 
 The page has two tabs over the same tree of access points: **Network** with their devices, and **Customers** by the
 access point they are connected through. Both say where the network is down, so that a customer behind an outage is
@@ -25,7 +37,7 @@ told apart from one whose router is off. The search covers both.
 The page is in English, or in the first language of the browser's preferences it has a translation for (Czech so
 far).
 
-Once the page loses the pinger — its window closed, say — the page is covered with a notice that what it shows is not
+Once the page loses the pinger — quit from its icon, say — the page is covered with a notice that what it shows is not
 current. The port stays the same between runs, so a pinger started again is found by the open page on its own, and
 starting it while it runs just opens its page.
 
@@ -105,7 +117,7 @@ There is no need for Go on the machine, a container does:
 
 ```sh
 docker run --rm -v "$PWD:/src" -w /src -e GOOS=windows -e GOARCH=amd64 golang:1.27 \
-    go build -trimpath -ldflags "-s -w" -o dist/watcher-pinger.exe ./src/desktop
+    go build -trimpath -ldflags "-s -w -H windowsgui" -o dist/watcher-pinger.exe ./src/desktop
 ```
 
 Tests run in the container too; those of the ICMP helper only on Windows, built with
@@ -114,6 +126,16 @@ Tests run in the container too; those of the ICMP helper only on Windows, built 
 ```sh
 docker run --rm -v "$PWD:/src" -w /src golang:1.27 go test -race ./...
 docker run --rm -v "$PWD:/src" -w /src golangci/golangci-lint:v2.15.0 golangci-lint run ./...
+```
+
+The icons are drawn in `src/desktop/icons/*.svg` and made into `.ico` files by `make.sh` there, with ImageMagick
+and librsvg. The icon of the program comes from `pinger.svg` through a Windows resource beside the code:
+
+```sh
+magick -background none -density 3072 src/desktop/icons/pinger.svg -filter Lanczos -resize 256x256 dist/pinger-256.png
+cd src/desktop && go run github.com/tc-hib/go-winres@v0.3.3 simply --icon ../../dist/pinger-256.png --manifest gui \
+    --product-name "Watcher Pinger" --file-description "Watcher Pinger" --original-filename watcher-pinger.exe \
+    --arch amd64 --out rsrc
 ```
 
 The image of the server:
