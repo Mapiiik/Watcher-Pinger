@@ -14,7 +14,8 @@ import (
 // Everything missing or wrong is told at once, so that a server is set up in one go.
 func TestTheConfigurationTellsAllThatIsWrong(t *testing.T) {
 	t.Setenv("PINGER_AUTH", "")
-	t.Setenv("PINGER_DATA", "")
+	t.Setenv("PINGER_NMS_URL", "https://nms.example.com")
+	t.Setenv("PINGER_NMS_TOKEN", "")
 	t.Setenv("PINGER_TIMEOUT", "a second")
 	t.Setenv("PINGER_USE_PROXY_PROTOCOL", "yes please")
 
@@ -22,7 +23,7 @@ func TestTheConfigurationTellsAllThatIsWrong(t *testing.T) {
 	if err == nil {
 		t.Fatal("taken")
 	}
-	for _, want := range []string{"PINGER_AUTH", "PINGER_DATA", "PINGER_TIMEOUT", "PINGER_USE_PROXY_PROTOCOL"} {
+	for _, want := range []string{"PINGER_AUTH", "PINGER_NMS_TOKEN", "PINGER_TIMEOUT", "PINGER_USE_PROXY_PROTOCOL"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("%s not told in %q", want, err)
 		}
@@ -49,6 +50,9 @@ func TestTheConfigurationOfOurServer(t *testing.T) {
 	}
 	if cfg.Monitor.DeviceInterval != 45*time.Second || cfg.Monitor.IdleInterval != time.Minute {
 		t.Errorf("intervals %+v", cfg.Monitor)
+	}
+	if cfg.NMSInterval != time.Hour || cfg.DataFile != "/data/watcher-pinger.json" {
+		t.Errorf("data from %q every %v into %q", cfg.NMSURL, cfg.NMSInterval, cfg.DataFile)
 	}
 	if cfg.Auth.Header != "X-Authentik-Username" {
 		t.Errorf("header %q", cfg.Auth.Header)

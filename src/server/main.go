@@ -15,7 +15,6 @@ import (
 	"os/signal"
 	"syscall"
 
-	"watcher-pinger/src/addressbook"
 	"watcher-pinger/src/auth"
 	"watcher-pinger/src/infra/icmpraw"
 	"watcher-pinger/src/monitor"
@@ -53,9 +52,10 @@ func run(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("sign-in: %w", err)
 	}
 
-	book, err := addressbook.Load(cfg.DataFile)
+	data := newSource(cfg)
+	book, err := data.first(ctx)
 	if err != nil {
-		return fmt.Errorf("cannot read %s: %w", cfg.DataFile, err)
+		return fmt.Errorf("no network to ping: %w", err)
 	}
 
 	pinger, err := icmpraw.Open()
@@ -67,9 +67,10 @@ func run(ctx context.Context, cfg Config) error {
 	pings := monitor.New(pinger, book.IPs(), book.DeviceIPs(), cfg.Monitor)
 	go pings.Run(ctx)
 
-	page := web.New(book, pings, cfg.DataFile)
+	page := web.New(book, pings, data.label())
 	page.Hosted = true
-	page.Reload = func(context.Context) (*addressbook.Book, error) { return addressbook.Load(cfg.DataFile) }
+	page.Reload = data.load
+	go data.refresh(ctx, page)
 	page.Identity = func(r *http.Request) (string, string) {
 		user, ok := auth.FromContext(r.Context())
 		if !ok {
@@ -103,7 +104,7 @@ func run(ctx context.Context, cfg Config) error {
 	}
 
 	log.Printf("Watcher Pinger %s is pinging %d addresses from %s, sign-in %s", version, len(book.IPs()),
-		cfg.DataFile, guard.Mode())
+		data.label(), guard.Mode())
 
 	select {
 	case <-ctx.Done():

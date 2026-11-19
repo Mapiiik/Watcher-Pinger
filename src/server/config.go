@@ -29,7 +29,12 @@ type Config struct {
 
 	Auth auth.Config
 
-	// DataFile is the file handed out by Watcher NMS
+	// NMSURL is the Watcher NMS the network is fetched from at every NMSInterval, with the key of a user of the role
+	// watcher-pinger; empty for the data file alone
+	NMSURL      string
+	NMSToken    string
+	NMSInterval time.Duration
+	// DataFile is the file handed out by Watcher NMS: the network itself, or the copy of the last one fetched
 	DataFile string
 
 	Monitor monitor.Options
@@ -47,7 +52,10 @@ func LoadConfig() (Config, error) {
 		CertDir:          env.text("PINGER_CERT_DIR", "/app/certs"),
 		UseProxyProtocol: env.boolean("PINGER_USE_PROXY_PROTOCOL"),
 		ProxyAllowCIDRs:  env.list("PINGER_PROXY_ALLOW_CIDRS"),
-		DataFile:         env.text("PINGER_DATA", ""),
+		NMSURL:           env.text("PINGER_NMS_URL", ""),
+		NMSToken:         env.text("PINGER_NMS_TOKEN", ""),
+		NMSInterval:      env.duration("PINGER_NMS_INTERVAL", time.Hour),
+		DataFile:         env.text("PINGER_DATA", "/app/data/watcher-pinger.json"),
 		Monitor: monitor.Options{
 			Timeout:         env.duration("PINGER_TIMEOUT", monitor.DefaultOptions.Timeout),
 			WatchedInterval: env.duration("PINGER_WATCHED_INTERVAL", monitor.DefaultOptions.WatchedInterval),
@@ -78,8 +86,8 @@ func LoadConfig() (Config, error) {
 		}
 		cfg.Auth.RedirectURL = "https://" + cfg.Hostname + "/auth/callback"
 	}
-	if cfg.DataFile == "" {
-		problems = append(problems, "PINGER_DATA is missing: the file handed out by Watcher NMS")
+	if cfg.NMSURL != "" && cfg.NMSToken == "" {
+		problems = append(problems, "PINGER_NMS_TOKEN is missing: the key of a user of the role watcher-pinger")
 	}
 
 	if len(problems) > 0 {
