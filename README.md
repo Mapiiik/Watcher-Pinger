@@ -13,7 +13,8 @@ too, for everyone who signs in to watch the network online.
 
 ## Using it
 
-1. Download `watcher-pinger.exe` from the [releases](https://github.com/Mapiiik/Watcher-Pinger/releases).
+1. Download `watcher-pinger.exe` from the [releases](https://github.com/Mapiiik/Watcher-Pinger/releases) (`watcher-pinger`
+   for Linux, see below).
 2. In Watcher NMS, **Access Points → Pinger → Download (.json)** gives `watcher-pinger.json`; put it next to
    `watcher-pinger.exe` (a synchronised folder kept available offline does well).
 3. Run `watcher-pinger.exe`. The page opens in the default browser, and an icon in the notification area says how
@@ -29,6 +30,12 @@ too, for everyone who signs in to watch the network online.
 
 Only the devices of the network count, as a router switched off at home is no fault of the network; its tooltip
 counts them. The outage stands apart by more than its colour, for the colour-blind and from the red of Watcher CRM.
+
+On Linux, `watcher-pinger` from the same releases shows the same icon where the desktop shows icons of programs
+(StatusNotifierItem: KDE, Xfce, Cinnamon, GNOME with the AppIndicator extension, which Ubuntu has on), and keeps to
+the console where it does not, over SSH say, stopping on Ctrl+C. It pings over an unprivileged ICMP socket, which most
+distributions allow in `net.ipv4.ping_group_range`; where they do not, `sudo setcap cap_net_raw+ep watcher-pinger`
+gives it a raw one.
 
 The page has two tabs over the same tree of access points: **Network** with their devices, and **Customers** by the
 access point they are connected through. Both say where the network is down, so that a customer behind an outage is

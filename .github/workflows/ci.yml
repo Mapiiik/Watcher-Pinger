@@ -116,19 +116,23 @@ jobs:
         run: |
           echo "version=$(git describe --tags --always --dirty)" >> "$GITHUB_OUTPUT"
 
+      # Windows without a console, with the icon in the notification area; Linux in the console
       - name: Build
         env:
-          GOOS: windows
-          GOARCH: amd64
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          go build -trimpath -ldflags "-s -w -H windowsgui -X main.version=${VERSION}" -o dist/watcher-pinger.exe ./src/desktop
+          GOOS=windows GOARCH=amd64 go build -trimpath -ldflags "-s -w -H windowsgui -X main.version=${VERSION}" \
+            -o dist/watcher-pinger.exe ./src/desktop
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
+            -o dist/watcher-pinger ./src/desktop
 
       - name: Upload
         uses: actions/upload-artifact@v7
         with:
           name: watcher-pinger-${{ steps.version.outputs.version }}
-          path: dist/watcher-pinger.exe
+          path: |
+            dist/watcher-pinger.exe
+            dist/watcher-pinger
           if-no-files-found: error
 
   ##########################################################################
@@ -219,7 +223,7 @@ jobs:
           if [[ "$TAG" == *-* ]]; then
             prerelease=(--prerelease)
           fi
-          gh release create "$TAG" watcher-pinger.exe \
+          gh release create "$TAG" watcher-pinger.exe watcher-pinger \
             --repo "$GITHUB_REPOSITORY" \
             --title "Watcher Pinger $TAG" \
             --generate-notes \

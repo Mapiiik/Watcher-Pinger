@@ -3,8 +3,8 @@
   waves of a signal, as Watcher CRM and NMS have it, on a tile in the colour of the state. pinger.svg, blue, is the
   icon of the program and of a pinger that has not heard from any device yet; the outage is a white tile with a red
   edge, as red alone would be the tile of Watcher CRM and the outage has to stand out, to the colour-blind too.
-  The .ico files are made from these by make.sh, with ImageMagick and librsvg. The program icon of the .exe is made
-  from this one by go-winres, see the README.
+  The .ico files and the .png ones of Linux are made from these by make.sh, with ImageMagick and librsvg. The icon
+  of the .exe is made from this one by go-winres, see the README.
 -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
   <rect width="32" height="32" rx="7" fill="#2563eb"/>

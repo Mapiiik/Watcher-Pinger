@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"watcher-pinger/src/addressbook"
-	"watcher-pinger/src/infra/icmpwin"
 	"watcher-pinger/src/monitor"
 	"watcher-pinger/src/web"
 )
@@ -33,6 +32,12 @@ const (
 
 // version is set by the build, from the tag of the commit.
 var version = "dev"
+
+// pinger pings, through the ICMP helper on Windows and over an ICMP socket elsewhere.
+type pinger interface {
+	monitor.Pinger
+	Close() error
+}
 
 func main() {
 	data := flag.String("data", defaultDataFile(), "the file handed out by Watcher NMS")
@@ -71,7 +76,7 @@ func main() {
 		fail("Cannot read %s: %v", *data, err)
 	}
 
-	pinger, err := icmpwin.Open()
+	pinger, err := openPinger()
 	if err != nil {
 		fail("Cannot ping: %v", err)
 	}

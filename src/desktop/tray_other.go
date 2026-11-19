@@ -1,19 +1,10 @@
-//go:build !windows
+//go:build !windows && !linux
 
 package main
 
-import (
-	"context"
-	"fmt"
-)
+import "context"
 
-// run keeps the pinger going in the console until it is interrupted, or until the page stops.
+// run keeps to the console, as there is no icon for the notification area of other systems yet.
 func (d *desktop) run(ctx context.Context) error {
-	fmt.Printf("The page is at %s, Ctrl+C stops the pinger.\n", d.url)
-	select {
-	case <-ctx.Done():
-		return nil
-	case err := <-d.stopped:
-		return err
-	}
+	return d.runConsole(ctx)
 }
