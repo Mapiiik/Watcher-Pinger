@@ -57,6 +57,7 @@ read changes nothing, and the page says why.
 | `-data` | `watcher-pinger.json` next to the program | the file from Watcher NMS |
 | `-listen` | `127.0.0.1:47380` | where the page is served |
 | `-no-browser` | off | do not open the page |
+| `-console` | off | keep to the console instead of the icon: on Windows that of cmd or PowerShell it is started from, or a window of its own, which stops the pinger once closed |
 | `-timeout` | `1s` | how long to wait for a reply |
 | `-watched-interval` | `5s` | how often what is expanded on the page is pinged |
 | `-device-interval` | `30s` | how often the other devices of the network are pinged |

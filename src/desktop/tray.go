@@ -73,9 +73,10 @@ func translation(tag string) (texts, bool) {
 
 // run keeps the icon in the notification area: its colour and tooltip say how the network is, a click opens the
 // page and its menu reads the data anew or quits. It returns once quit, or with the error the page stopped with.
-// Without a notification area to show it in, a Linux reached over SSH say, the pinger keeps to the console.
+// With -console, or without a notification area to show it in, a Linux reached over SSH say, the pinger keeps to the
+// console.
 func (d *desktop) run(ctx context.Context) error {
-	if !trayAvailable() {
+	if d.console || !trayAvailable() {
 		return d.runConsole(ctx)
 	}
 	t := language()

@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"watcher-pinger/src/addressbook"
@@ -50,9 +51,13 @@ func main() {
 		"how often the other devices of the network are pinged")
 	idleInterval := flag.Duration("idle-interval", monitor.DefaultOptions.IdleInterval,
 		"how often the other customers are pinged")
+	inConsole := flag.Bool("console", false, "keep to the console instead of the icon in the notification area")
 	showVersion := flag.Bool("version", false, "tell the version and stop")
 	flag.Parse()
 
+	if *inConsole {
+		openConsole()
+	}
 	if *showVersion {
 		tell("Watcher Pinger " + version)
 		return
@@ -89,7 +94,8 @@ func main() {
 	options.IdleInterval = *idleInterval
 	pings := monitor.New(pinger, book.IPs(), book.DeviceIPs(), options)
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	// Ctrl+C, and on Windows the console window closed, which Go tells as SIGTERM
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	go pings.Run(ctx)
 
@@ -111,7 +117,7 @@ func main() {
 	}()
 
 	fmt.Printf("Watcher Pinger %s is pinging %d addresses from %s\n", version, len(book.IPs()), *data)
-	d := &desktop{url: url, page: page, pings: pings, stopped: stopped}
+	d := &desktop{url: url, page: page, pings: pings, stopped: stopped, console: *inConsole}
 	if !*noBrowser {
 		d.openPage()
 	}
@@ -124,14 +130,16 @@ func main() {
 	}
 }
 
-// desktop is the pinger on the computer of the one looking at it: the page in the browser and, on Windows, the
-// icon in the notification area.
+// desktop is the pinger on the computer of the one looking at it: the page in the browser and the icon in the
+// notification area, or the console.
 type desktop struct {
 	url   string
 	page  *web.Server
 	pings *monitor.Monitor
 	// stopped tells why the page stopped being served
 	stopped <-chan error
+	// console keeps the pinger to the console rather than the icon
+	console bool
 }
 
 func (d *desktop) openPage() {
