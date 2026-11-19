@@ -80,8 +80,10 @@ The page is served on the loopback only and answers no other host name. It recei
 ## On a server
 
 `watcher-pinger-server` is the same pinger and page for Linux, as the image `ghcr.io/mapiiik/watcher-pinger`
-(`latest` from `main`, the version and its major number from a tag). It pings over a raw socket, so the container
-needs `NET_RAW`, and is set up from the environment; [`.env.example`](.env.example) lists every variable with what
+(`latest` from `main`, the version and its major number from a tag). It pings over an unprivileged ICMP socket where
+the system allows it in `net.ipv4.ping_group_range`, as Docker does, and over a raw one otherwise, which needs
+`NET_RAW`; `PINGER_ICMP` picks one for good. An unprivileged socket gets only its own replies, while a raw one sees
+those of every program on the machine and passes over what is not its own. It is set up from the environment; [`.env.example`](.env.example) lists every variable with what
 it is for, and [`compose.production.yaml`](compose.production.yaml) runs it.
 
 - **Listening** is that of [Watcher Agent](https://github.com/Mapiiik/Watcher-Agent): with `PINGER_HOSTNAME` a
@@ -109,7 +111,7 @@ it and should not stand behind anything it watches.
 
 ## Building
 
-The CI lints and tests every push, the ICMP helper on Windows itself and the raw socket with the right to it, keeps
+The CI lints and tests every push, the ICMP helper on Windows itself and both ICMP sockets with the right to them, keeps
 the program it builds as an artifact of the run and pushes the image of the server. A tag, a bare version as the
 other Watcher applications have it (`1.0.0`, `1.1.0-RC1` for a prerelease), publishes the program as a release.
 

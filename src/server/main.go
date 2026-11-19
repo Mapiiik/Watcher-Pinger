@@ -16,7 +16,7 @@ import (
 	"syscall"
 
 	"watcher-pinger/src/auth"
-	"watcher-pinger/src/infra/icmpraw"
+	"watcher-pinger/src/infra/icmpsocket"
 	"watcher-pinger/src/monitor"
 	"watcher-pinger/src/web"
 )
@@ -58,9 +58,9 @@ func run(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("no network to ping: %w", err)
 	}
 
-	pinger, err := icmpraw.Open()
+	pinger, err := icmpsocket.Open(cfg.ICMP)
 	if err != nil {
-		return fmt.Errorf("cannot ping (CAP_NET_RAW is needed): %w", err)
+		return fmt.Errorf("cannot ping: %w", err)
 	}
 	defer func() { _ = pinger.Close() }()
 
@@ -103,8 +103,8 @@ func run(ctx context.Context, cfg Config) error {
 		go func() { stopped <- serve(cfg, srv, srv == pageServer) }()
 	}
 
-	log.Printf("Watcher Pinger %s is pinging %d addresses from %s, sign-in %s", version, len(book.IPs()),
-		data.label(), guard.Mode())
+	log.Printf("Watcher Pinger %s is pinging %d addresses from %s over an ICMP socket %s, sign-in %s", version,
+		len(book.IPs()), data.label(), pinger.Kind(), guard.Mode())
 
 	select {
 	case <-ctx.Done():

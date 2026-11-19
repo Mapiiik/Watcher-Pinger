@@ -19,7 +19,7 @@ services:
       - "80:80"
       - "443:443"
 
-    # ICMP over a raw socket; 80 and 443
+    # ICMP over a raw socket where the unprivileged one is not allowed; 80 and 443
     cap_add:
       - NET_RAW
       - NET_BIND_SERVICE

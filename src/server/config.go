@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"watcher-pinger/src/auth"
+	"watcher-pinger/src/infra/icmpsocket"
 	"watcher-pinger/src/monitor"
 )
 
@@ -37,6 +38,9 @@ type Config struct {
 	// DataFile is the file handed out by Watcher NMS: the network itself, or the copy of the last one fetched
 	DataFile string
 
+	// ICMP is the kind of socket pinged over: auto, unprivileged or raw
+	ICMP icmpsocket.Kind
+
 	Monitor monitor.Options
 }
 
@@ -56,6 +60,7 @@ func LoadConfig() (Config, error) {
 		NMSToken:         env.text("PINGER_NMS_TOKEN", ""),
 		NMSInterval:      env.duration("PINGER_NMS_INTERVAL", time.Hour),
 		DataFile:         env.text("PINGER_DATA", "/app/data/watcher-pinger.json"),
+		ICMP:             icmpsocket.Kind(env.text("PINGER_ICMP", string(icmpsocket.Auto))),
 		Monitor: monitor.Options{
 			Timeout:         env.duration("PINGER_TIMEOUT", monitor.DefaultOptions.Timeout),
 			WatchedInterval: env.duration("PINGER_WATCHED_INTERVAL", monitor.DefaultOptions.WatchedInterval),
@@ -85,6 +90,11 @@ func LoadConfig() (Config, error) {
 			problems = append(problems, "PINGER_OIDC_REDIRECT_URL is missing, and there is no PINGER_HOSTNAME to make it of")
 		}
 		cfg.Auth.RedirectURL = "https://" + cfg.Hostname + "/auth/callback"
+	}
+	switch cfg.ICMP {
+	case icmpsocket.Auto, icmpsocket.Unprivileged, icmpsocket.Raw:
+	default:
+		problems = append(problems, fmt.Sprintf("PINGER_ICMP is not auto, unprivileged or raw: %q", cfg.ICMP))
 	}
 	if cfg.NMSURL != "" && cfg.NMSToken == "" {
 		problems = append(problems, "PINGER_NMS_TOKEN is missing: the key of a user of the role watcher-pinger")
