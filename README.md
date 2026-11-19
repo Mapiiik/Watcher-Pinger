@@ -1,5 +1,6 @@
 # Watcher Pinger
 
+[![CI](https://github.com/Mapiiik/Watcher-Pinger/actions/workflows/ci.yml/badge.svg)](https://github.com/Mapiiik/Watcher-Pinger/actions/workflows/ci.yml)
 [![License: AGPL v3+](https://img.shields.io/badge/License-AGPL%20v3%2B-blue.svg)](LICENSE.md)
 [![Go](https://img.shields.io/badge/Go-1.27-00ADD8.svg)](go.mod)
 
@@ -11,8 +12,9 @@ technician standing in it has the last copy on their own computer.
 
 ## Using it
 
-1. In Watcher NMS, **Access Points → Watcher Pinger (.json)** downloads `watcher-pinger.json`.
-2. Put it next to `watcher-pinger.exe` (a synchronised folder kept available offline does well).
+1. Download `watcher-pinger.exe` from the [releases](https://github.com/Mapiiik/Watcher-Pinger/releases).
+2. In Watcher NMS, **Access Points → Watcher Pinger (.json)** downloads `watcher-pinger.json`; put it next to
+   `watcher-pinger.exe` (a synchronised folder kept available offline does well).
 3. Run `watcher-pinger.exe`. The page opens in the default browser; closing the console window stops the pinger.
 
 The page has two tabs over the same tree of access points: **Network** with their devices, and **Customers** by the
@@ -35,6 +37,7 @@ starting it while it runs just opens its page.
 | `-watched-interval` | `5s` | how often what is expanded on the page is pinged |
 | `-device-interval` | `30s` | how often the other devices of the network are pinged |
 | `-idle-interval` | `1m` | how often the other customers are pinged |
+| `-version` | | tell the version and stop |
 
 ## How it pings
 
@@ -58,6 +61,10 @@ The page is served on the loopback only and answers no other host name. It recei
 (server-sent events) and keeps in the page only what is expanded.
 
 ## Building
+
+The CI lints and tests every push, the ICMP helper on Windows itself, and keeps the program it builds as an
+artifact of the run. A tag, a bare version as the other Watcher applications have it (`1.0.0`, `1.1.0-RC1` for a
+prerelease), publishes the program as a release.
 
 There is no need for Go on the machine, a container does:
 

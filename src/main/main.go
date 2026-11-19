@@ -31,6 +31,9 @@ const (
 	defaultListen = "127.0.0.1:47380"
 )
 
+// version is set by the build, from the tag of the commit.
+var version = "dev"
+
 func main() {
 	data := flag.String("data", defaultDataFile(), "the file handed out by Watcher NMS")
 	listen := flag.String("listen", defaultListen, "where the page is served")
@@ -42,7 +45,13 @@ func main() {
 		"how often the other devices of the network are pinged")
 	idleInterval := flag.Duration("idle-interval", monitor.DefaultOptions.IdleInterval,
 		"how often the other customers are pinged")
+	showVersion := flag.Bool("version", false, "tell the version and stop")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println("Watcher Pinger", version)
+		return
+	}
 
 	listener, err := net.Listen("tcp", *listen)
 	if err != nil {
@@ -91,7 +100,7 @@ func main() {
 		_ = server.Close()
 	}()
 
-	fmt.Printf("Watcher Pinger is pinging %d addresses from %s\n", len(book.IPs()), *data)
+	fmt.Printf("Watcher Pinger %s is pinging %d addresses from %s\n", version, len(book.IPs()), *data)
 	fmt.Printf("The page is at %s, closing this window stops it.\n", url)
 	if !*noBrowser {
 		if err := openBrowser(url); err != nil {
