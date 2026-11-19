@@ -16,5 +16,5 @@ for name in pinger all-up losses outage no-network; do
     # shellcheck disable=SC2086
     "$magick" $sizes "$name.ico"
     # Linux takes a PNG and scales it to its panel
-    "$magick" -background none -density 768 "$name.svg" -filter Lanczos -resize 64x64 "$name.png"
+    "$magick" -background none -density 768 "$name.svg" -filter Lanczos -resize 64x64 -strip "$name.png"
 done
