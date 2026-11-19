@@ -105,7 +105,7 @@ There is no need for Go on the machine, a container does:
 
 ```sh
 docker run --rm -v "$PWD:/src" -w /src -e GOOS=windows -e GOARCH=amd64 golang:1.27 \
-    go build -trimpath -ldflags "-s -w" -o dist/watcher-pinger.exe ./src/main
+    go build -trimpath -ldflags "-s -w" -o dist/watcher-pinger.exe ./src/desktop
 ```
 
 Tests run in the container too; those of the ICMP helper only on Windows, built with
