@@ -1,0 +1,29 @@
+# Watcher Pinger on a server of its own, answering on 80 and 443. Behind a proxy that passes TLS through with the
+# PROXY header, HAProxy in TCP mode say, drop the ports, join the proxy's network under an alias and set
+# PINGER_USE_PROXY_PROTOCOL and PINGER_PROXY_ALLOW_CIDRS; see the README.
+services:
+  watcher-pinger:
+    image: ghcr.io/mapiiik/watcher-pinger:latest
+    restart: unless-stopped
+    stop_grace_period: 60s
+
+    env_file:
+      - .env
+
+    volumes:
+      # the ACME certificates, and the last network fetched from Watcher NMS for a start without it
+      - pinger_certs:/app/certs/
+      - pinger_data:/app/data/
+
+    ports:
+      - "80:80"
+      - "443:443"
+
+    # ICMP over a raw socket; 80 and 443
+    cap_add:
+      - NET_RAW
+      - NET_BIND_SERVICE
+
+volumes:
+  pinger_certs:
+  pinger_data:

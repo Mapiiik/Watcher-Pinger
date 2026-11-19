@@ -1,0 +1,32 @@
+# The server of Watcher Pinger. The program for Windows is built by the CI on its own.
+
+# ---------- build ----------
+ARG GO_VERSION="1.27"
+FROM --platform=${BUILDPLATFORM:-linux/amd64} golang:${GO_VERSION}-alpine AS build
+
+ARG TARGETOS
+ARG TARGETARCH
+ARG VERSION="dev"
+
+WORKDIR /app
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
+    go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/watcher-pinger-server ./src/server \
+    && mkdir -p /out/certs /out/data
+
+# ---------- runtime ----------
+# Nothing runs in this stage (Alpine ships the CA bundle), so other platforms need no emulation. The folders for
+# the certificates and for the last network fetched come from the build stage for that reason.
+FROM alpine:latest
+
+WORKDIR /app
+
+COPY --from=build /out/ /app/
+
+EXPOSE 80 443
+
+ENTRYPOINT ["/app/watcher-pinger-server"]

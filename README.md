@@ -8,7 +8,8 @@ Pings the network [Watcher NMS](https://github.com/Mapiiik/Watcher-NMS) knows an
 the access points with their devices and customers, with what answers, what does not, and where an outage starts.
 
 It runs from a file Watcher NMS hands out, so it keeps working in a part of the network cut off from the rest — the
-technician standing in it has the last copy on their own computer.
+technician standing in it has the last copy on their own computer. The same page runs [on a server](#on-a-server)
+too, for everyone who signs in to watch the network online.
 
 ## Using it
 
@@ -27,6 +28,10 @@ far).
 Once the page loses the pinger — its window closed, say — the page is covered with a notice that what it shows is not
 current. The port stays the same between runs, so a pinger started again is found by the open page on its own, and
 starting it while it runs just opens its page.
+
+A newer file from Watcher NMS is taken by **Reload data** on the page, without starting the pinger again: an address
+kept keeps its state and the loss over its last pings, and what was expanded stays expanded. A file that cannot be
+read changes nothing, and the page says why.
 
 | Option | Default | |
 | --- | --- | --- |
@@ -58,13 +63,43 @@ The tree can be narrowed to the **Outages**, among them the addresses that answe
 **Losses**, the addresses that answer but lose anything at all, which is where a poor link shows.
 
 The page is served on the loopback only and answers no other host name. It receives the states as they change
-(server-sent events) and keeps in the page only what is expanded.
+(server-sent events) and keeps in the page only what is expanded. Every page open watches what it shows.
+
+## On a server
+
+`watcher-pinger-server` is the same pinger and page for Linux, as the image `ghcr.io/mapiiik/watcher-pinger`
+(`latest` from `main`, the version and its major number from a tag). It pings over a raw socket, so the container
+needs `NET_RAW`, and is set up from the environment; [`.env.example`](.env.example) lists every variable with what
+it is for, and [`compose.production.yaml`](compose.production.yaml) runs it.
+
+- **Listening** is that of [Watcher Agent](https://github.com/Mapiiik/Watcher-Agent): with `PINGER_HOSTNAME` a
+  certificate from Let's Encrypt over TLS-ALPN on 443, without it a self-signed one, plain HTTP redirecting to HTTPS.
+  Behind a proxy passing TLS through, HAProxy in TCP mode say, `PINGER_USE_PROXY_PROTOCOL` takes the PROXY header
+  from the networks in `PINGER_PROXY_ALLOW_CIDRS`. An empty `PINGER_LISTEN_HTTPS` serves the page on
+  `PINGER_LISTEN_HTTP` alone, for TLS ended by a proxy in front.
+- **Who may see it** is `PINGER_AUTH`, which has no default:
+  - `oidc` signs in at the identity provider of the organisation (Authentik, Keycloak, …) with the authorization code
+    flow and PKCE, the callback being `https://<PINGER_HOSTNAME>/auth/callback`. The session is a signed cookie, so
+    the server keeps nothing and may start again; `PINGER_OIDC_GROUPS` lets in members of the groups given only.
+  - `header` takes the user from a header set by a proxy doing its own sign-in, forward auth say, and only from the
+    proxies in `PINGER_AUTH_PROXY_CIDRS`.
+  - `none` asks nobody, for a server guarded some other way; it says so in its log.
+
+  A sign-in not set up fully stops the start rather than letting anybody in.
+- **The network** comes from [Watcher NMS](https://github.com/Mapiiik/Watcher-NMS) at
+  `/api/access-points/pinger.json`, fetched with the key of a user of the role `watcher-pinger` every
+  `PINGER_NMS_INTERVAL` (an hour) and on **Reload data**. The last network fetched is kept in `PINGER_DATA`, a
+  volume, so that a start with Watcher NMS out of reach pings what was pinged before. Without `PINGER_NMS_URL` the
+  server reads `PINGER_DATA` alone.
+
+Where it runs decides what it sees: the server pings from its place in the network, so it needs routes into all of
+it and should not stand behind anything it watches.
 
 ## Building
 
-The CI lints and tests every push, the ICMP helper on Windows itself, and keeps the program it builds as an
-artifact of the run. A tag, a bare version as the other Watcher applications have it (`1.0.0`, `1.1.0-RC1` for a
-prerelease), publishes the program as a release.
+The CI lints and tests every push, the ICMP helper on Windows itself and the raw socket with the right to it, keeps
+the program it builds as an artifact of the run and pushes the image of the server. A tag, a bare version as the
+other Watcher applications have it (`1.0.0`, `1.1.0-RC1` for a prerelease), publishes the program as a release.
 
 There is no need for Go on the machine, a container does:
 
@@ -79,6 +114,12 @@ Tests run in the container too; those of the ICMP helper only on Windows, built 
 ```sh
 docker run --rm -v "$PWD:/src" -w /src golang:1.27 go test -race ./...
 docker run --rm -v "$PWD:/src" -w /src golangci/golangci-lint:v2.15.0 golangci-lint run ./...
+```
+
+The image of the server:
+
+```sh
+docker build -f docker/Dockerfile.production --build-arg VERSION=$(git describe --tags --always) -t watcher-pinger .
 ```
 
 ## License
