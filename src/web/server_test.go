@@ -84,9 +84,10 @@ func TestThePageAndTheBookAreServed(t *testing.T) {
 	_, url := serve(t, &fakeMonitor{})
 
 	for path, want := range map[string]string{
-		"/":         "<title>Watcher Pinger</title>",
-		"/app.js":   "function recount()",
-		"/api/book": `"dataFile":"data.json"`,
+		"/":            "<title>Watcher Pinger</title>",
+		"/app.js":      "function recount()",
+		"/favicon.svg": `fill="#2563eb"`,
+		"/api/book":    `"dataFile":"data.json"`,
 	} {
 		response, err := http.Get(url + path)
 		if err != nil {

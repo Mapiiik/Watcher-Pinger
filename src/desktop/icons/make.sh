@@ -21,3 +21,16 @@ done
 
 # the icon of the program, which go-winres makes the Windows resource of, see ../winres/winres.json
 "$magick" -background none -density 3072 pinger.svg -filter Lanczos -resize 256x256 -strip program.png
+
+# the icons of the page, as Watcher CRM and NMS have them: the browser takes the SVG, or the ICO where it cannot,
+# a phone the PNG on its home screen, square, as it rounds the corners itself
+web=../../web/static
+sed '/^<!--/,/^-->/d' pinger.svg >"$web/favicon.svg"
+sizes=""
+for size in 16 32 48; do
+    "$magick" -background none -density $((12 * size)) pinger.svg -filter Lanczos -resize "${size}x${size}" "$tmp/favicon-$size.png"
+    sizes="$sizes $tmp/favicon-$size.png"
+done
+# shellcheck disable=SC2086
+"$magick" $sizes "$web/favicon.ico"
+"$magick" -background "#2563eb" -density 2160 pinger.svg -filter Lanczos -resize 180x180 -flatten -strip "$web/apple-touch-icon.png"
