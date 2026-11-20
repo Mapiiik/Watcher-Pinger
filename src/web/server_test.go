@@ -223,7 +223,20 @@ func TestTheDataAreReadAnewOnRequest(t *testing.T) {
 		t.Fatalf("bad data: status %d, the book replaced %v", response.StatusCode, handler.book.Load() != book)
 	}
 
+	// right after a reading the next one waits, failed or not
 	failing.Store(false)
+	response, err = http.Post(url+"/api/reload", "application/json", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusTooManyRequests || handler.book.Load() != book {
+		t.Fatalf("too soon: status %d, the book replaced %v", response.StatusCode, handler.book.Load() != book)
+	}
+	handler.reloadMu.Lock()
+	handler.reloaded = time.Time{}
+	handler.reloadMu.Unlock()
+
 	response, err = http.Post(url+"/api/reload", "application/json", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -315,5 +328,72 @@ func TestAQuietStreamStillBeats(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed < 80*time.Millisecond {
 		t.Errorf("three beats in %v, want them a heartbeat apart", elapsed)
+	}
+}
+
+// Another site open in the same browser cannot post to the page: not reload, not watch.
+func TestAnotherSiteCannotPost(t *testing.T) {
+	book := &addressbook.Book{Format: addressbook.Format, Version: 1}
+	server := httptest.NewUnstartedServer(nil)
+	host := server.Listener.Addr().String()
+	handler := New(book, &fakeMonitor{}, "data.json")
+	var reloaded atomic.Bool
+	handler.Reload = func(context.Context) (*addressbook.Book, error) {
+		reloaded.Store(true)
+		return book, nil
+	}
+	server.Config.Handler = handler.Handler([]string{host}, nil)
+	server.Start()
+	t.Cleanup(server.Close)
+	url := "http://" + host
+
+	for path, headers := range map[string]map[string]string{
+		"/api/reload":            {"Sec-Fetch-Site": "cross-site"},
+		"/api/watch?viewer=page": {"Sec-Fetch-Site": "same-site"},
+		"/api/reload?origin":     {"Origin": "https://evil.example"},
+	} {
+		request, _ := http.NewRequest(http.MethodPost, url+path, strings.NewReader("[]"))
+		request.Header.Set("Content-Type", "text/plain")
+		for k, v := range headers {
+			request.Header.Set(k, v)
+		}
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = response.Body.Close()
+		if response.StatusCode != http.StatusForbidden {
+			t.Errorf("%s with %v: status %d", path, headers, response.StatusCode)
+		}
+	}
+	if reloaded.Load() {
+		t.Error("read anew for another site")
+	}
+
+	// the page itself may
+	request, _ := http.NewRequest(http.MethodPost, url+"/api/reload", nil)
+	request.Header.Set("Sec-Fetch-Site", "same-origin")
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusOK || !reloaded.Load() {
+		t.Errorf("the page itself: status %d", response.StatusCode)
+	}
+}
+
+// No other site shows the page in a frame of its own.
+func TestThePageIsNotFramed(t *testing.T) {
+	_, url := serve(t, &fakeMonitor{})
+
+	response, err := http.Get(url + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if response.Header.Get("Content-Security-Policy") != "frame-ancestors 'none'" ||
+		response.Header.Get("X-Frame-Options") != "DENY" {
+		t.Errorf("headers %v", response.Header)
 	}
 }

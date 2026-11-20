@@ -76,6 +76,10 @@ func run(ctx context.Context, cfg Config) error {
 	page.Hosted = true
 	page.Reload = data.load
 	go data.refresh(ctx, page)
+	page.Who = func(r *http.Request) string {
+		user, _ := auth.FromContext(r.Context())
+		return user.Name
+	}
 	page.Identity = func(r *http.Request) (string, string) {
 		user, ok := auth.FromContext(r.Context())
 		if !ok {
@@ -87,6 +91,9 @@ func run(ctx context.Context, cfg Config) error {
 		return user.Name, guard.SignOutPath()
 	}
 	handler := drain(page.Handler(hosts(cfg), guard.Wrap))
+	if cfg.ListenHTTPS != "" {
+		handler = strictTransport(handler)
+	}
 
 	var servers []*http.Server
 	var pageServer *http.Server
@@ -143,6 +150,14 @@ func serve(cfg Config, srv *http.Server, page bool) error {
 		return nil
 	}
 	return err
+}
+
+// strictTransport tells the browser to come over HTTPS only for a year, where the server itself ends TLS.
+func strictTransport(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Strict-Transport-Security", "max-age=31536000")
+		next.ServeHTTP(w, r)
+	})
 }
 
 // hosts are the names the page answers to: the server's own, with the port where it is not the usual one, or any

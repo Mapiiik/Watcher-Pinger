@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
+	"net"
 	"net/http"
 	"slices"
 	"sync"
@@ -21,6 +23,11 @@ import (
 
 //go:embed static
 var static embed.FS
+
+// reloadGap is the least time between two readings asked for on a page, which go to Watcher NMS on a server.
+const reloadGap = 5 * time.Second
+
+var errTooSoon = errors.New("the data were read anew a moment ago, try again in a few seconds")
 
 // Monitor is what the page needs of the monitor.
 type Monitor interface {
@@ -42,6 +49,7 @@ type Server struct {
 	streamsMu sync.Mutex
 	streams   map[string]int
 	reloadMu  sync.Mutex
+	reloaded  time.Time
 
 	// Interval is how often the page is sent what changed.
 	Interval time.Duration
@@ -50,6 +58,8 @@ type Server struct {
 	Heartbeat time.Duration
 	// Identity tells the page who is signed in and where they sign out, nil where nobody signs in.
 	Identity func(r *http.Request) (user, signOut string)
+	// Who is the user name of a request for the log, nil where nobody signs in.
+	Who func(r *http.Request) string
 	// Reload reads the data anew when the page asks for it, nil where it cannot.
 	Reload func(ctx context.Context) (*addressbook.Book, error)
 	// Hosted tells the page it is served by a server rather than by the pinger of the one looking at it.
@@ -98,12 +108,27 @@ func (s *Server) Handler(hosts []string, guard func(http.Handler) http.Handler) 
 		page = guard(mux)
 	}
 
+	// Another site open in the same browser must not reload or watch through the page: a POST has to come from the
+	// page itself (Sec-Fetch-Site, or Origin against Host), a sister domain included.
+	crossOrigin := http.NewCrossOriginProtection()
+	crossOrigin.SetDenyHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		slog.Warn("request refused", "user", s.who(r), "client", clientIP(r), "path", r.URL.Path,
+			"reason", "from another site", "origin", r.Header.Get("Origin"))
+		http.Error(w, "a request from another site", http.StatusForbidden)
+	}))
+	page = crossOrigin.Handler(page)
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if len(hosts) > 0 && !slices.Contains(hosts, r.Host) {
 			http.Error(w, "unknown host", http.StatusForbidden)
 			return
 		}
-		w.Header().Set("Cache-Control", "no-store")
+		header := w.Header()
+		header.Set("Cache-Control", "no-store")
+		// no other site shows the page in a frame of its own, to have it clicked unseen
+		header.Set("Content-Security-Policy", "frame-ancestors 'none'")
+		header.Set("X-Frame-Options", "DENY")
+		header.Set("X-Content-Type-Options", "nosniff")
 		page.ServeHTTP(w, r)
 	})
 }
@@ -130,37 +155,70 @@ func (s *Server) handleBook(w http.ResponseWriter, _ *http.Request) {
 	}{s.dataFile, s.book.Load(), s.Reload != nil, s.Hosted})
 }
 
-// handleReload reads the data anew. Data that cannot be read change nothing, and the page is told why.
+// handleReload reads the data anew, not twice within reloadGap. Data that cannot be read change nothing, and the page
+// is told why. Who asked is logged.
 func (s *Server) handleReload(w http.ResponseWriter, r *http.Request) {
 	if s.Reload == nil {
 		http.Error(w, "the data cannot be read anew here", http.StatusNotFound)
 		return
 	}
-	book, err := s.ReloadNow(r.Context())
+	book, err := s.reload(r.Context(), reloadGap)
 	if err != nil {
+		slog.Warn("data not read anew", "user", s.who(r), "client", clientIP(r), "error", err)
+		status := http.StatusUnprocessableEntity
+		if errors.Is(err, errTooSoon) {
+			status = http.StatusTooManyRequests
+		}
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusUnprocessableEntity)
+		w.WriteHeader(status)
 		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
+	slog.Info("data read anew", "user", s.who(r), "client", clientIP(r), "generated", book.Generated)
 	writeJSON(w, map[string]any{"generated": book.Generated})
 }
 
 // ReloadNow reads the data anew and makes them the ones pinged and shown, one reading at a time. Data that cannot be
 // read change nothing.
 func (s *Server) ReloadNow(ctx context.Context) (*addressbook.Book, error) {
+	return s.reload(ctx, 0)
+}
+
+// reload is ReloadNow that refuses when the last reading, whether it worked or not, is less than gap ago.
+func (s *Server) reload(ctx context.Context, gap time.Duration) (*addressbook.Book, error) {
 	if s.Reload == nil {
 		return nil, errors.New("the data cannot be read anew here")
 	}
 	s.reloadMu.Lock()
 	defer s.reloadMu.Unlock()
 
+	if gap > 0 && time.Since(s.reloaded) < gap {
+		return nil, errTooSoon
+	}
 	book, err := s.Reload(ctx)
+	s.reloaded = time.Now()
 	if err != nil {
 		return nil, err
 	}
 	s.SetBook(book)
 	return book, nil
+}
+
+// who is the user of the request for the log, empty where nobody signs in.
+func (s *Server) who(r *http.Request) string {
+	if s.Who == nil {
+		return ""
+	}
+	return s.Who(r)
+}
+
+// clientIP is the address of who asks, the one from the PROXY header behind a proxy.
+func clientIP(r *http.Request) string {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
 }
 
 // Book is the book pinged and shown now.
