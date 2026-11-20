@@ -121,14 +121,14 @@ jobs:
         run: |
           echo "version=$(git describe --tags --always --dirty)" >> "$GITHUB_OUTPUT"
 
-      # the version into the properties of the .exe: the number of the tag as the file version, 0.0.0.0 without one,
-      # and the whole of it as the product version
+      # the version into the properties of the .exe: the number of the tag as the file version, 0.0.0.0 without one
+      # (a bare commit, whose digits are no version), and the whole of it as the product version
       - name: Windows resource
         env:
           VERSION: ${{ steps.version.outputs.version }}
         working-directory: src/desktop
         run: |
-          number=$(echo "$VERSION" | grep -oE '^v?[0-9]+(\.[0-9]+){0,3}' | sed 's/^v//' || true)
+          number=$(echo "$VERSION" | grep -oE '^v?[0-9]+(\.[0-9]+){1,3}' | sed 's/^v//' || true)
           go run github.com/tc-hib/go-winres@v0.3.3 make --in winres/winres.json --arch amd64 --out rsrc \
             --file-version "${number:-0.0.0.0}" --product-version "$VERSION"
 
