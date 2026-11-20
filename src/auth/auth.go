@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -107,7 +108,8 @@ func (g *Guard) SignOutPath() string {
 	return ""
 }
 
-// Wrap answers the sign-in itself and lets through to next only a request it knows the user of.
+// Wrap answers the sign-in itself and lets through to next only a request it knows the user of. A request of a session
+// ends when the session does, so that the stream of states stops with it and the page asks for a sign-in.
 func (g *Guard) Wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if g.oidc != nil && strings.HasPrefix(r.URL.Path, pathPrefix) {
@@ -115,12 +117,18 @@ func (g *Guard) Wrap(next http.Handler) http.Handler {
 			return
 		}
 
-		user, ok := g.user(r)
+		user, expires, ok := g.user(r)
 		if !ok {
 			g.refuse(w, r)
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userKey{}, user)))
+		ctx := context.WithValue(r.Context(), userKey{}, user)
+		if !expires.IsZero() {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithDeadline(ctx, expires)
+			defer cancel()
+		}
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
@@ -130,18 +138,23 @@ func FromContext(ctx context.Context) (User, bool) {
 	return user, ok && user.Name != ""
 }
 
-func (g *Guard) user(r *http.Request) (User, bool) {
+// user is who asks and when their session runs out, zero where it does not.
+func (g *Guard) user(r *http.Request) (User, time.Time, bool) {
 	switch g.mode {
 	case Header:
 		if !g.fromProxy(r) {
-			return User{}, false
+			slog.Warn("request refused", "client", clientIP(r), "path", r.URL.Path, "reason", "not from the proxy")
+			return User{}, time.Time{}, false
 		}
 		name := strings.TrimSpace(r.Header.Get(g.header))
-		return User{Name: name}, name != ""
+		if name == "" {
+			slog.Warn("request refused", "client", clientIP(r), "path", r.URL.Path, "reason", "no user in "+g.header)
+		}
+		return User{Name: name}, time.Time{}, name != ""
 	case OIDC:
 		return g.oidc.session(r)
 	default:
-		return User{}, true
+		return User{}, time.Time{}, true
 	}
 }
 
@@ -160,12 +173,17 @@ func (g *Guard) refuse(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, loginPath+"?return="+url.QueryEscape(r.URL.RequestURI()), http.StatusFound)
 }
 
-func (g *Guard) fromProxy(r *http.Request) bool {
+// clientIP is the address of who asks, the one from the PROXY header behind a proxy.
+func clientIP(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
-		host = r.RemoteAddr
+		return r.RemoteAddr
 	}
-	ip := net.ParseIP(host)
+	return host
+}
+
+func (g *Guard) fromProxy(r *http.Request) bool {
+	ip := net.ParseIP(clientIP(r))
 	for _, n := range g.proxies {
 		if ip != nil && n.Contains(ip) {
 			return true

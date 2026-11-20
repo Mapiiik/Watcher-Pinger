@@ -28,19 +28,20 @@ func (s signer) sign(purpose string, value any, expires time.Time) (string, erro
 	return encoded + "." + base64.RawURLEncoding.EncodeToString(s.mac(purpose, encoded)), nil
 }
 
-// open reads a cookie value back into value, unless it was changed, signed for another purpose or has run out.
-func (s signer) open(purpose, cookie string, value any, now time.Time) error {
+// open reads a cookie value back into value and tells when it runs out, unless it was changed, signed for another
+// purpose or has run out already.
+func (s signer) open(purpose, cookie string, value any, now time.Time) (time.Time, error) {
 	encoded, mac, found := strings.Cut(cookie, ".")
 	if !found {
-		return errors.New("not a signed value")
+		return time.Time{}, errors.New("not a signed value")
 	}
 	given, err := base64.RawURLEncoding.DecodeString(mac)
 	if err != nil || !hmac.Equal(given, s.mac(purpose, encoded)) {
-		return errors.New("the signature does not match")
+		return time.Time{}, errors.New("the signature does not match")
 	}
 	payload, err := base64.RawURLEncoding.DecodeString(encoded)
 	if err != nil {
-		return err
+		return time.Time{}, err
 	}
 
 	var wrapped struct {
@@ -48,12 +49,12 @@ func (s signer) open(purpose, cookie string, value any, now time.Time) error {
 		Expires int64           `json:"e"`
 	}
 	if err := json.Unmarshal(payload, &wrapped); err != nil {
-		return err
+		return time.Time{}, err
 	}
 	if now.Unix() >= wrapped.Expires {
-		return errors.New("run out")
+		return time.Time{}, errors.New("run out")
 	}
-	return json.Unmarshal(wrapped.Value, value)
+	return time.Unix(wrapped.Expires, 0), json.Unmarshal(wrapped.Value, value)
 }
 
 // mac binds the value to its purpose, so that a cookie of one kind cannot be passed off as another.

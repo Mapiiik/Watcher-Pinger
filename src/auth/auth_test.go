@@ -1,12 +1,14 @@
 package auth
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -18,6 +20,18 @@ import (
 	"github.com/go-jose/go-jose/v4"
 	"github.com/go-jose/go-jose/v4/jwt"
 )
+
+// testKey is a session key of the length needed.
+const testKey = "0123456789abcdef0123456789abcdef"
+
+// captureLog collects what the package logs during the test.
+func captureLog(t *testing.T) *bytes.Buffer {
+	var buf bytes.Buffer
+	prev := log.Writer()
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(prev) })
+	return &buf
+}
 
 // page answers with who is asking, as the guard lets it through.
 var page = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -100,21 +114,22 @@ func TestASignedValueCannotBeChanged(t *testing.T) {
 	}
 
 	var user User
-	if err := s.open("purpose", signed, &user, now); err != nil || user.Name != "jdoe" {
-		t.Fatalf("%v, %+v", err, user)
+	expires, err := s.open("purpose", signed, &user, now)
+	if err != nil || user.Name != "jdoe" || expires.Unix() != now.Add(time.Minute).Unix() {
+		t.Fatalf("%v, %+v, runs out %v", err, user, expires)
 	}
-	if s.open("other", signed, &user, now) == nil {
+	if _, err := s.open("other", signed, &user, now); err == nil {
 		t.Error("taken for another purpose")
 	}
-	if s.open("purpose", signed, &user, now.Add(2*time.Minute)) == nil {
+	if _, err := s.open("purpose", signed, &user, now.Add(2*time.Minute)); err == nil {
 		t.Error("taken after running out")
 	}
-	if (signer{key: []byte("other key")}).open("purpose", signed, &user, now) == nil {
+	if _, err := (signer{key: []byte("other key")}).open("purpose", signed, &user, now); err == nil {
 		t.Error("taken with another key")
 	}
 	payload, mac, _ := strings.Cut(signed, ".")
 	changed := base64.RawURLEncoding.EncodeToString([]byte(`{"v":{"name":"admin"},"e":9999999999}`))
-	if s.open("purpose", changed+"."+mac, &user, now) == nil || payload == changed {
+	if _, err := s.open("purpose", changed+"."+mac, &user, now); err == nil || payload == changed {
 		t.Error("a changed value was taken")
 	}
 }
@@ -128,6 +143,14 @@ func TestTheWayBackStaysOnTheServer(t *testing.T) {
 		"//evil.example/":      "/",
 		"/\\evil.example":      "/",
 		"/auth/login":          "/",
+		// a browser drops the tab and goes to //evil.example
+		"/\t/evil.example/phish": "/",
+		"/\n/evil.example":       "/",
+		"/\r/evil.example":       "/",
+		"/\x7f/evil.example":     "/",
+		"/x\\..\\..\\evil":       "/",
+		"/%2F%2Fevil.example":    "/%2F%2Fevil.example",
+		"/a/b?c=d#e":             "/a/b?c=d#e",
 	} {
 		if got := localPath(given); got != want {
 			t.Errorf("%q gave %q, want %q", given, got, want)
@@ -233,7 +256,7 @@ func oidcGuard(t *testing.T, p *provider, groups ...string) *Guard {
 	t.Helper()
 	g, err := New(context.Background(), Config{
 		Mode: OIDC, Issuer: p.URL, ClientID: "pinger", ClientSecret: "secret",
-		RedirectURL: "https://pinger.example.com/auth/callback", Groups: groups, SessionKey: []byte("key"),
+		RedirectURL: "https://pinger.example.com/auth/callback", Groups: groups, SessionKey: []byte(testKey),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -267,6 +290,7 @@ func signIn(t *testing.T, p *provider, h http.Handler) *httptest.ResponseRecorde
 }
 
 func TestOIDCSignsInAndKeepsTheSession(t *testing.T) {
+	logged := captureLog(t)
 	p := newProvider(t)
 	g := oidcGuard(t, p)
 	h := g.Wrap(page)
@@ -295,6 +319,41 @@ func TestOIDCSignsInAndKeepsTheSession(t *testing.T) {
 	if w.Header().Get("Location") != p.URL+"/end-session" {
 		t.Errorf("signed out to %q", w.Header().Get("Location"))
 	}
+
+	for _, line := range []string{"INFO signed in user=jdoe client=192.0.2.1", "INFO signed out user=jdoe client=192.0.2.1"} {
+		if !strings.Contains(logged.String(), line) {
+			t.Errorf("the log lacks %q in %q", line, logged.String())
+		}
+	}
+}
+
+// A request of a session ends when the session does, the stream of states with it.
+func TestARequestEndsWithTheSession(t *testing.T) {
+	p := newProvider(t)
+	var deadline time.Time
+	h := oidcGuard(t, p).Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		deadline, _ = r.Context().Deadline()
+	}))
+
+	signedIn := time.Now()
+	session := signIn(t, p, h).Result().Cookies()
+	serve(t, h, request("/api/events", session))
+
+	if want := signedIn.Add(12 * time.Hour); deadline.Before(want.Add(-time.Minute)) || deadline.After(want.Add(time.Minute)) {
+		t.Errorf("the request ends at %v, the session at about %v", deadline, want)
+	}
+}
+
+// A short key would let anybody find it from a login cookie and sign a session of their own.
+func TestAShortSessionKeyIsRefused(t *testing.T) {
+	p := newProvider(t)
+	_, err := New(context.Background(), Config{
+		Mode: OIDC, Issuer: p.URL, ClientID: "pinger", ClientSecret: "secret",
+		RedirectURL: "https://pinger.example.com/auth/callback", SessionKey: []byte(testKey[1:]),
+	})
+	if err == nil || !strings.Contains(err.Error(), "PINGER_SESSION_KEY") {
+		t.Errorf("err = %v", err)
+	}
 }
 
 // Coming back with a state other than the one sent away with is refused, and so is a code the provider never gave.
@@ -315,9 +374,13 @@ func TestOIDCRefusesASignInItDidNotStart(t *testing.T) {
 }
 
 func TestOIDCLetsInOnlyTheGroupsGiven(t *testing.T) {
+	logged := captureLog(t)
 	p := newProvider(t, "customers")
 	if w := signIn(t, p, oidcGuard(t, p, "staff").Wrap(page)); w.Code != http.StatusForbidden {
 		t.Errorf("another group: status %d", w.Code)
+	}
+	if line := `WARN sign-in refused user=jdoe client=192.0.2.1 reason="in none of the groups allowed"`; !strings.Contains(logged.String(), line) {
+		t.Errorf("the log lacks %q in %q", line, logged.String())
 	}
 
 	p = newProvider(t, "customers", "staff")
