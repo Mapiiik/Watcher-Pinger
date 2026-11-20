@@ -58,7 +58,12 @@ func run(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("no network to ping: %w", err)
 	}
 
-	pinger, err := icmpsocket.Open(cfg.ICMP, icmpsocket.IPv4)
+	// a family that cannot be pinged is logged and tried again a minute later, neither of them stops the start
+	pinger, err := icmpsocket.OpenPingers(cfg.ICMP, func(fam icmpsocket.Family, _ *icmpsocket.Pinger, err error) {
+		if err != nil {
+			log.Printf("ICMP %s: %v", fam.Name, err)
+		}
+	})
 	if err != nil {
 		return fmt.Errorf("cannot ping: %w", err)
 	}
@@ -103,8 +108,8 @@ func run(ctx context.Context, cfg Config) error {
 		go func() { stopped <- serve(cfg, srv, srv == pageServer) }()
 	}
 
-	log.Printf("Watcher Pinger %s is pinging %d addresses from %s over an ICMP socket %s, sign-in %s", version,
-		len(book.IPs()), data.label(), pinger.Kind(), guard.Mode())
+	log.Printf("Watcher Pinger %s is pinging %d addresses from %s over ICMP sockets %s, sign-in %s", version,
+		len(book.IPs()), data.label(), pinger.Describe(), guard.Mode())
 
 	select {
 	case <-ctx.Done():

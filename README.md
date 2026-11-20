@@ -66,8 +66,8 @@ read changes nothing, and the page says why.
 
 ## How it pings
 
-Through the ICMP helper of Windows (`IcmpSendEcho2` in `iphlpapi.dll`), which needs no administrator, unlike a raw
-socket. The requests go out from a few threads of the pinger's own, each taking the replies to its requests as APCs
+Through the ICMP helper of Windows (`IcmpSendEcho2` and `Icmp6SendEcho2` in `iphlpapi.dll`, IPv4 and IPv6), which
+needs no administrator, unlike a raw socket. The requests go out from a few threads of the pinger's own, each taking the replies to its requests as APCs
 while it waits; a thread waiting for every request makes Windows wake them all whenever any one is done, which costs
 the processor ten times as much. Sending a ping takes a few milliseconds of the processor on some machines, which is
 what the intervals are set by.
@@ -91,7 +91,9 @@ The page is served on the loopback only and answers no other host name. It recei
 (`latest` from `main`, the version and its major number from a tag). It pings over an unprivileged ICMP socket where
 the system allows it in `net.ipv4.ping_group_range`, as Docker does, and over a raw one otherwise, which needs
 `NET_RAW`; `PINGER_ICMP` picks one for good. An unprivileged socket gets only its own replies, while a raw one sees
-those of every program on the machine and passes over what is not its own. It is set up from the environment; [`.env.example`](.env.example) lists every variable with what
+those of every program on the machine and lets only echo replies through. Both families are pinged, each over a
+socket of its own; one the machine cannot open is logged and tried again a minute later. The package
+`src/infra/icmpsocket` is the same byte for byte in Watcher Agent. It is set up from the environment; [`.env.example`](.env.example) lists every variable with what
 it is for, and [`compose.production.yaml`](compose.production.yaml) runs it.
 
 - **Listening** is that of [Watcher Agent](https://github.com/Mapiiik/Watcher-Agent): with `PINGER_HOSTNAME` a

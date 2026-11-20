@@ -1,6 +1,7 @@
 //go:build windows
 
-// Package icmpwin pings through the ICMP helper of Windows, which needs no administrator, unlike a raw socket.
+// Package icmpwin pings IPv4 and IPv6 through the ICMP helper of Windows, which needs no administrator, unlike a raw
+// socket.
 //
 // Requests go out from a few threads of the pinger's own, each taking the replies to its requests as APCs while it
 // waits. A thread waiting in IcmpSendEcho for each request costs the processor ten times as much once there are a
@@ -9,6 +10,7 @@
 package icmpwin
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -27,6 +29,10 @@ var (
 	procIcmpCloseHandle  = iphlpapi.NewProc("IcmpCloseHandle")
 	procIcmpSendEcho2    = iphlpapi.NewProc("IcmpSendEcho2")
 	procIcmpParseReplies = iphlpapi.NewProc("IcmpParseReplies")
+
+	procIcmp6CreateFile   = iphlpapi.NewProc("Icmp6CreateFile")
+	procIcmp6SendEcho2    = iphlpapi.NewProc("Icmp6SendEcho2")
+	procIcmp6ParseReplies = iphlpapi.NewProc("Icmp6ParseReplies")
 
 	kernel32                  = windows.NewLazySystemDLL("kernel32.dll")
 	procWaitForSingleObjectEx = kernel32.NewProc("WaitForSingleObjectEx")
@@ -52,6 +58,14 @@ type icmpEchoReply struct {
 	Options       ipOptionInformation
 }
 
+// ICMPV6_ECHO_REPLY is read by offsets: its address is an IPV6_ADDRESS_EX, which is packed (port, flow, address,
+// scope), and the status and round trip follow at the next multiple of four.
+const (
+	icmp6ReplyAddress = 6
+	icmp6ReplyStatus  = 28
+	icmp6ReplyRTT     = 32
+)
+
 const (
 	// ipSuccess is the status of an echo reply from the address asked.
 	ipSuccess = 0
@@ -71,8 +85,9 @@ const (
 var (
 	payload = []byte("watcher-pinger")
 
-	// replySize leaves room for the reply, its data and an ICMP error message.
-	replySize = int(unsafe.Sizeof(icmpEchoReply{})) + len(payload) + 8 + 8
+	// replySize leaves room for the reply of either family, its data, an ICMP error message and the status block of
+	// an asynchronous request.
+	replySize = int(unsafe.Sizeof(icmpEchoReply{})) + len(payload) + 8 + 32
 
 	errClosed = errors.New("the pinger is closed")
 )
@@ -84,7 +99,13 @@ type result struct {
 }
 
 type request struct {
-	address uint32
+	// an IPv4 address as the helper takes it, or an IPv6 one with the addresses of both ends
+	address     uint32
+	v6          bool
+	address6    [16]byte
+	source      *windows.RawSockaddrInet6
+	destination *windows.RawSockaddrInet6
+
 	timeout uint32
 	reply   []byte
 	done    chan result
@@ -97,9 +118,12 @@ type Pinger struct {
 	quit    chan struct{}
 }
 
-// sender is one thread sending requests over a handle of its own and taking the replies to them.
+// sender is one thread sending requests over handles of its own and taking the replies to them.
 type sender struct {
-	handle   uintptr
+	handle uintptr
+	// handle6 is 0 on a Windows without IPv6, err6 then says why
+	handle6  uintptr
+	err6     error
 	wake     windows.Handle
 	queue    chan *request
 	quit     chan struct{}
@@ -136,8 +160,18 @@ func newSender(quit chan struct{}) (*sender, error) {
 		return nil, fmt.Errorf("CreateEvent: %w", err)
 	}
 
+	// without IPv6 the sender still pings IPv4
+	handle6, _, err6 := procIcmp6CreateFile.Call()
+	if handle6 == uintptr(windows.InvalidHandle) {
+		handle6, err6 = 0, fmt.Errorf("Icmp6CreateFile: %w", err6)
+	} else {
+		err6 = nil
+	}
+
 	s := &sender{
 		handle:  handle,
+		handle6: handle6,
+		err6:    err6,
 		wake:    wake,
 		queue:   make(chan *request, 4096),
 		quit:    quit,
@@ -161,6 +195,11 @@ func (p *Pinger) Close() error {
 		if ok, _, err := procIcmpCloseHandle.Call(s.handle); ok == 0 {
 			failed = fmt.Errorf("IcmpCloseHandle: %w", err)
 		}
+		if s.handle6 != 0 {
+			if ok, _, err := procIcmpCloseHandle.Call(s.handle6); ok == 0 {
+				failed = fmt.Errorf("IcmpCloseHandle: %w", err)
+			}
+		}
 	}
 	return failed
 }
@@ -168,20 +207,25 @@ func (p *Pinger) Close() error {
 // Ping sends one echo request and waits for its reply. Without one in time, or with one from elsewhere, ok is false
 // and there is no error: an error means the request did not go out. The helper measures in whole milliseconds.
 func (p *Pinger) Ping(ip net.IP, timeout time.Duration) (time.Duration, bool, error) {
-	ip4 := ip.To4()
-	if ip4 == nil {
-		return 0, false, errors.New("not an IPv4 address")
-	}
-
 	milliseconds := uint32(timeout / time.Millisecond)
 	if milliseconds == 0 {
 		milliseconds = 1
 	}
 	r := &request{
-		address: binary.LittleEndian.Uint32(ip4),
 		timeout: milliseconds,
 		reply:   make([]byte, replySize),
 		done:    make(chan result, 1),
+	}
+	switch {
+	case ip.To4() != nil:
+		r.address = binary.LittleEndian.Uint32(ip.To4())
+	case len(ip) == net.IPv6len:
+		r.v6 = true
+		copy(r.address6[:], ip)
+		r.source = &windows.RawSockaddrInet6{Family: windows.AF_INET6}
+		r.destination = &windows.RawSockaddrInet6{Family: windows.AF_INET6, Addr: r.address6}
+	default:
+		return 0, false, errors.New("not an IP address")
 	}
 
 	// the first thread sends what comes in ones and twos, the others help with a queue, at the start above all: the
@@ -238,23 +282,47 @@ func (s *sender) run() {
 }
 
 func (s *sender) send(r *request) {
+	if r.v6 && s.handle6 == 0 {
+		r.done <- result{err: s.err6}
+		return
+	}
+
 	id := s.nextID
 	s.nextID++
 	s.pending[id] = r
 
-	sent, _, err := procIcmpSendEcho2.Call(
-		s.handle,
-		0,
-		s.callback,
-		id,
-		uintptr(r.address),
-		uintptr(unsafe.Pointer(&payload[0])),
-		uintptr(len(payload)),
-		0,
-		uintptr(unsafe.Pointer(&r.reply[0])),
-		uintptr(len(r.reply)),
-		uintptr(r.timeout),
-	)
+	var sent uintptr
+	var err error
+	if r.v6 {
+		sent, _, err = procIcmp6SendEcho2.Call(
+			s.handle6,
+			0,
+			s.callback,
+			id,
+			uintptr(unsafe.Pointer(r.source)),
+			uintptr(unsafe.Pointer(r.destination)),
+			uintptr(unsafe.Pointer(&payload[0])),
+			uintptr(len(payload)),
+			0,
+			uintptr(unsafe.Pointer(&r.reply[0])),
+			uintptr(len(r.reply)),
+			uintptr(r.timeout),
+		)
+	} else {
+		sent, _, err = procIcmpSendEcho2.Call(
+			s.handle,
+			0,
+			s.callback,
+			id,
+			uintptr(r.address),
+			uintptr(unsafe.Pointer(&payload[0])),
+			uintptr(len(payload)),
+			0,
+			uintptr(unsafe.Pointer(&r.reply[0])),
+			uintptr(len(r.reply)),
+			uintptr(r.timeout),
+		)
+	}
 	if sent != 0 || errors.Is(err, windows.ERROR_IO_PENDING) {
 		return
 	}
@@ -263,6 +331,10 @@ func (s *sender) send(r *request) {
 	var errno windows.Errno
 	if errors.As(err, &errno) && errno >= ipStatusBase && errno < ipStatusEnd {
 		r.done <- result{}
+		return
+	}
+	if r.v6 {
+		r.done <- result{err: fmt.Errorf("Icmp6SendEcho2: %w", err)}
 		return
 	}
 	r.done <- result{err: fmt.Errorf("IcmpSendEcho2: %w", err)}
@@ -275,6 +347,19 @@ func (s *sender) completed(context, _, _ uintptr) uintptr {
 		return 0
 	}
 	delete(s.pending, context)
+
+	if r.v6 {
+		count, _, _ := procIcmp6ParseReplies.Call(uintptr(unsafe.Pointer(&r.reply[0])), uintptr(len(r.reply)))
+		status := binary.LittleEndian.Uint32(r.reply[icmp6ReplyStatus:])
+		from := r.reply[icmp6ReplyAddress : icmp6ReplyAddress+net.IPv6len]
+		if count == 0 || status != ipSuccess || !bytes.Equal(from, r.address6[:]) {
+			r.done <- result{}
+			return 0
+		}
+		rtt := binary.LittleEndian.Uint32(r.reply[icmp6ReplyRTT:])
+		r.done <- result{rtt: time.Duration(rtt) * time.Millisecond, ok: true}
+		return 0
+	}
 
 	count, _, _ := procIcmpParseReplies.Call(uintptr(unsafe.Pointer(&r.reply[0])), uintptr(len(r.reply)))
 	echo := (*icmpEchoReply)(unsafe.Pointer(&r.reply[0]))

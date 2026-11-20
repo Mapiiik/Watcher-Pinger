@@ -45,8 +45,40 @@ func TestAnAddressNobodyHasIsNoAnswerAndNoError(t *testing.T) {
 	}
 }
 
-func TestAnIPv6AddressIsRefused(t *testing.T) {
-	if _, _, err := open(t).Ping(net.ParseIP("::1"), time.Second); err == nil {
+func TestTheIPv6LoopbackAnswers(t *testing.T) {
+	p := open(t)
+	if p.senders[0].handle6 == 0 {
+		t.Skipf("no IPv6 here: %v", p.senders[0].err6)
+	}
+
+	rtt, ok, err := p.Ping(net.IPv6loopback, time.Second)
+	if err != nil || !ok {
+		t.Fatalf("ok = %v, err = %v; want an answer", ok, err)
+	}
+	if rtt < 0 || rtt > time.Second {
+		t.Errorf("round trip %v", rtt)
+	}
+}
+
+func TestAnIPv6AddressNobodyHasIsNoAnswerAndNoError(t *testing.T) {
+	p := open(t)
+	if p.senders[0].handle6 == 0 {
+		t.Skipf("no IPv6 here: %v", p.senders[0].err6)
+	}
+
+	// 2001:db8::/32 is for documentation, nothing answers it
+	_, ok, err := p.Ping(net.ParseIP("2001:db8::1"), 300*time.Millisecond)
+	if ok {
+		t.Fatal("2001:db8::1 answered")
+	}
+	if err != nil {
+		// a machine without an IPv6 route cannot send it at all
+		t.Logf("not sent: %v", err)
+	}
+}
+
+func TestNotAnAddressIsRefused(t *testing.T) {
+	if _, _, err := open(t).Ping(net.IP{1, 2, 3}, time.Second); err == nil {
 		t.Fatal("want an error")
 	}
 }
