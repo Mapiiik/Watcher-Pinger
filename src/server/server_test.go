@@ -97,3 +97,47 @@ func TestPlainHTTPGoesToHTTPS(t *testing.T) {
 		}
 	}
 }
+
+// What would let anybody claim an address, or send the key of Watcher NMS unencrypted, stops the start.
+func TestTheConfigurationRefusesWhatWouldLetAnybodyIn(t *testing.T) {
+	for name, tc := range map[string]struct {
+		env  map[string]string
+		want string
+	}{
+		"PROXY from anybody": {map[string]string{"PINGER_USE_PROXY_PROTOCOL": "true"}, "PINGER_PROXY_ALLOW_CIDRS is missing"},
+		"PROXY in front of the header": {map[string]string{
+			"PINGER_AUTH": "header", "PINGER_AUTH_PROXY_CIDRS": "10.0.0.0/8",
+			"PINGER_USE_PROXY_PROTOCOL": "true", "PINGER_PROXY_ALLOW_CIDRS": "192.168.1.0/24",
+		}, "PINGER_AUTH=header"},
+		"a network that is none": {map[string]string{
+			"PINGER_USE_PROXY_PROTOCOL": "true", "PINGER_PROXY_ALLOW_CIDRS": "192.168.1.0/24 192.168.1.300/24",
+		}, `not a network: "192.168.1.300/24"`},
+		"NMS over HTTP": {map[string]string{"PINGER_NMS_URL": "http://nms.example.com", "PINGER_NMS_TOKEN": "key"}, "PINGER_NMS_URL"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("PINGER_AUTH", "none")
+			t.Setenv("PINGER_DATA", "data.json")
+			for k, v := range tc.env {
+				t.Setenv(k, v)
+			}
+			if _, err := LoadConfig(); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("err = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// A browser sends the host in lower case, so the name is kept so.
+func TestTheHostnameIsInLowerCase(t *testing.T) {
+	t.Setenv("PINGER_AUTH", "none")
+	t.Setenv("PINGER_DATA", "data.json")
+	t.Setenv("PINGER_HOSTNAME", "Pinger.Example.COM")
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Hostname != "pinger.example.com" {
+		t.Errorf("hostname %q", cfg.Hostname)
+	}
+}

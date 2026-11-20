@@ -56,3 +56,23 @@ func TestWhatIsNotTheNetworkIsAnError(t *testing.T) {
 		}
 	}
 }
+
+// A redirect is not followed, the key would go with it.
+func TestARedirectIsNotFollowed(t *testing.T) {
+	followed := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/elsewhere" {
+			followed = true
+			return
+		}
+		http.Redirect(w, r, "/elsewhere", http.StatusFound)
+	}))
+	t.Cleanup(server.Close)
+
+	if _, _, err := New(server.URL, "key").Fetch(context.Background()); err == nil || !strings.Contains(err.Error(), "302") {
+		t.Errorf("err = %v", err)
+	}
+	if followed {
+		t.Error("the redirect was followed")
+	}
+}

@@ -106,19 +106,12 @@ func selfSignedCertificate() (tls.Certificate, error) {
 }
 
 // proxyListener uses the PROXY header only from the given networks and lets it be missing there. From anywhere else
-// the header is dropped and the connection keeps its real address. Without any network it is used from everybody.
+// the header is dropped and the connection keeps its real address. The configuration has the networks checked.
 func proxyListener(ln net.Listener, allowCIDRs []string) net.Listener {
-	if len(allowCIDRs) == 0 {
-		log.Println("WARNING: PINGER_PROXY_ALLOW_CIDRS is not set, anybody who reaches this port can claim any address")
-		return &proxyproto.Listener{Listener: ln}
-	}
-
 	var networks []*net.IPNet
 	for _, c := range allowCIDRs {
 		if _, n, err := net.ParseCIDR(c); err == nil {
 			networks = append(networks, n)
-		} else {
-			log.Printf("WARNING: PINGER_PROXY_ALLOW_CIDRS: not a network: %q", c)
 		}
 	}
 	return &proxyproto.Listener{

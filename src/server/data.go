@@ -65,8 +65,9 @@ func (s *source) first(ctx context.Context) (*addressbook.Book, error) {
 	return addressbook.Load(s.file)
 }
 
-// refresh fetches the network from Watcher NMS at every interval until ctx ends. A fetch that fails leaves the
-// network as it was until the next one.
+// refresh fetches the network from Watcher NMS at every interval until ctx ends, through the page, so that it never
+// runs beside a reload asked for on the page and overwrites a newer network. A fetch that fails leaves the network as
+// it was until the next one.
 func (s *source) refresh(ctx context.Context, page *web.Server) {
 	if s.nms == nil {
 		return
@@ -79,12 +80,9 @@ func (s *source) refresh(ctx context.Context, page *web.Server) {
 			return
 		case <-ticker.C:
 		}
-		book, err := s.load(ctx)
-		if err != nil {
+		if _, err := page.ReloadNow(ctx); err != nil {
 			log.Println(err)
-			continue
 		}
-		page.SetBook(book)
 	}
 }
 

@@ -3,6 +3,8 @@ package main
 import (
 	"errors"
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -50,9 +52,10 @@ func LoadConfig() (Config, error) {
 	env := environment{problems: &problems}
 
 	cfg := Config{
-		ListenHTTP:       env.text("PINGER_LISTEN_HTTP", "0.0.0.0:80"),
-		ListenHTTPS:      env.optional("PINGER_LISTEN_HTTPS", "0.0.0.0:443"),
-		Hostname:         env.text("PINGER_HOSTNAME", ""),
+		ListenHTTP:  env.text("PINGER_LISTEN_HTTP", "0.0.0.0:80"),
+		ListenHTTPS: env.optional("PINGER_LISTEN_HTTPS", "0.0.0.0:443"),
+		// a browser sends the host in lower case, a name in capitals would turn every request away
+		Hostname:         strings.ToLower(env.text("PINGER_HOSTNAME", "")),
 		CertDir:          env.text("PINGER_CERT_DIR", "/app/certs"),
 		UseProxyProtocol: env.boolean("PINGER_USE_PROXY_PROTOCOL"),
 		ProxyAllowCIDRs:  env.list("PINGER_PROXY_ALLOW_CIDRS"),
@@ -98,6 +101,28 @@ func LoadConfig() (Config, error) {
 	}
 	if cfg.NMSURL != "" && cfg.NMSToken == "" {
 		problems = append(problems, "PINGER_NMS_TOKEN is missing: the key of a user of the role watcher-pinger")
+	}
+	// the key travels with every request, so only encrypted
+	if u, err := url.Parse(cfg.NMSURL); cfg.NMSURL != "" && (err != nil || u.Scheme != "https" || u.Host == "") {
+		problems = append(problems, fmt.Sprintf("PINGER_NMS_URL is not an https address: %q", cfg.NMSURL))
+	}
+
+	// Behind a PROXY header the address of a request is the one the header claims, so who may send it has to be
+	// known. The header mode checks the address of the proxy setting the user, which the PROXY header replaces.
+	if cfg.UseProxyProtocol {
+		if len(cfg.ProxyAllowCIDRs) == 0 {
+			problems = append(problems, "PINGER_PROXY_ALLOW_CIDRS is missing: the networks of the proxy sending "+
+				"the PROXY header, anybody else could claim any address")
+		}
+		if cfg.Auth.Mode == auth.Header {
+			problems = append(problems, "PINGER_AUTH=header does not go with PINGER_USE_PROXY_PROTOCOL: the address "+
+				"of the proxy setting the user is lost behind the PROXY header")
+		}
+	}
+	for _, c := range cfg.ProxyAllowCIDRs {
+		if _, _, err := net.ParseCIDR(c); err != nil {
+			problems = append(problems, fmt.Sprintf("PINGER_PROXY_ALLOW_CIDRS: not a network: %q", c))
+		}
 	}
 
 	if len(problems) > 0 {

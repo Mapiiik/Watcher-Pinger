@@ -28,12 +28,18 @@ type Client struct {
 	HTTP  *http.Client
 }
 
-// New asks the Watcher NMS at the given address with the given key.
+// New asks the Watcher NMS at the given address with the given key. A redirect is not followed: the key would go
+// with it, to the same host over plain HTTP as well.
 func New(url, token string) *Client {
 	return &Client{
 		URL:   strings.TrimRight(url, "/"),
 		Token: token,
-		HTTP:  &http.Client{Timeout: time.Minute},
+		HTTP: &http.Client{
+			Timeout: time.Minute,
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		},
 	}
 }
 
