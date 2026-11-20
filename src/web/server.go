@@ -77,6 +77,8 @@ type Server struct {
 	Reload func(ctx context.Context) (*addressbook.Book, error)
 	// Hosted tells the page it is served by a server rather than by the pinger of the one looking at it.
 	Hosted bool
+	// Key, where set, lets in only the browser the pinger opened the page in, see keyed.
+	Key string
 }
 
 // New serves the given book and the states its monitor keeps.
@@ -119,6 +121,9 @@ func (s *Server) Handler(hosts []string, guard func(http.Handler) http.Handler) 
 	var page http.Handler = mux
 	if guard != nil {
 		page = guard(mux)
+	}
+	if s.Key != "" {
+		page = s.keyed(page)
 	}
 
 	// Another site open in the same browser must not reload or watch through the page: a POST has to come from the

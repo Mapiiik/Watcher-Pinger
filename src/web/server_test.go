@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -429,5 +430,77 @@ func TestStreamsAreBounded(t *testing.T) {
 	_ = response.Body.Close()
 	if response.StatusCode != http.StatusTooManyRequests {
 		t.Errorf("one stream too many: status %d", response.StatusCode)
+	}
+}
+
+// Only the browser the pinger opened gets in: the key in the address becomes a cookie of its port and leaves the
+// address, and a browser without it is told where to open the page from, in its language.
+func TestTheKeyLetsInOnlyTheBrowserThePingerOpened(t *testing.T) {
+	const key = "the-key-of-the-user-0123456789abcdef"
+	book := &addressbook.Book{Format: addressbook.Format, Version: 1}
+	server := httptest.NewUnstartedServer(nil)
+	host := server.Listener.Addr().String()
+	handler := New(book, &fakeMonitor{}, "data.json")
+	handler.Key = key
+	server.Config.Handler = handler.Handler([]string{host}, nil)
+	server.Start()
+	t.Cleanup(server.Close)
+	_, port, _ := net.SplitHostPort(host)
+
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	get := func(path, language string, cookie *http.Cookie) (*http.Response, string) {
+		t.Helper()
+		request, _ := http.NewRequest(http.MethodGet, "http://"+host+path, nil)
+		if language != "" {
+			request.Header.Set("Accept-Language", language)
+		}
+		if cookie != nil {
+			request.AddCookie(cookie)
+		}
+		response, err := client.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body := new(strings.Builder)
+		_, _ = bufio.NewReader(response.Body).WriteTo(body)
+		_ = response.Body.Close()
+		return response, body.String()
+	}
+
+	for path, want := range map[string]string{
+		"/":                      "Open the page from Watcher Pinger",
+		"/?key=not-the-key":      "Open the page from Watcher Pinger",
+		"/api/book":              `"error":"no key`,
+		"/api/events?viewer=abc": `"error":"no key`,
+	} {
+		if response, body := get(path, "en-GB", nil); response.StatusCode != http.StatusForbidden || !strings.Contains(body, want) {
+			t.Errorf("%s: %d %.120q", path, response.StatusCode, body)
+		}
+	}
+	if response, body := get("/", "cs-CZ,cs;q=0.9", nil); response.StatusCode != http.StatusForbidden ||
+		!strings.Contains(body, "Otevřete stránku z Watcher Pingeru") {
+		t.Errorf("in Czech: %d %.120q", response.StatusCode, body)
+	}
+	if response, _ := get("/favicon.svg", "", nil); response.StatusCode != http.StatusOK {
+		t.Errorf("the icon of the page without a key: %d", response.StatusCode)
+	}
+
+	response, _ := get("/?tab=customers&key="+key, "", nil)
+	if response.StatusCode != http.StatusSeeOther || response.Header.Get("Location") != "/?tab=customers" {
+		t.Fatalf("the key in the address: %d to %q", response.StatusCode, response.Header.Get("Location"))
+	}
+	cookies := response.Cookies()
+	if len(cookies) != 1 || cookies[0].Name != KeyCookie+port || !cookies[0].HttpOnly ||
+		cookies[0].SameSite != http.SameSiteStrictMode {
+		t.Fatalf("cookies %+v", cookies)
+	}
+
+	if response, body := get("/api/book", "", cookies[0]); response.StatusCode != http.StatusOK ||
+		!strings.Contains(body, `"dataFile":"data.json"`) {
+		t.Errorf("with the cookie: %d %.80q", response.StatusCode, body)
+	}
+	other := &http.Cookie{Name: KeyCookie + "1", Value: key}
+	if response, _ := get("/api/book", "", other); response.StatusCode != http.StatusForbidden {
+		t.Errorf("the cookie of another port: %d", response.StatusCode)
 	}
 }

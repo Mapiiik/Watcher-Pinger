@@ -5,11 +5,9 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
-	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -61,16 +59,22 @@ func main() {
 		return
 	}
 
-	listener, err := net.Listen("tcp", *listen)
+	key, err := pageKey()
 	if err != nil {
-		// started a second time, it shows the page of the one running
-		if url := "http://" + *listen + "/"; isPinger(url) {
-			fmt.Printf("Watcher Pinger is running already, its page is at %s\n", url)
-			if !*noBrowser {
-				_ = openBrowser(url)
-			}
-			return
+		fail("Cannot keep the key of the page: %v", err)
+	}
+
+	// started a second time, it shows the page of the one running; another user of the computer gets a pinger of
+	// their own on the next free port
+	listener, running, err := listenFor(*listen, key, *listen == defaultListen)
+	if running != "" {
+		fmt.Printf("Watcher Pinger is running already, its page is at %s\n", running)
+		if !*noBrowser {
+			_ = openBrowser(withKey(running, key))
 		}
+		return
+	}
+	if err != nil {
 		fail("Cannot listen on %s: %v", *listen, err)
 	}
 
@@ -98,9 +102,11 @@ func main() {
 	go pings.Run(ctx)
 
 	host := listener.Addr().String()
-	url := "http://" + host + "/"
+	url := withKey("http://"+host+"/", key)
 
 	page := web.New(book, pings, *data)
+	// only the browser this pinger opens gets in, not another user of the same computer
+	page.Key = key
 	// a new file from Watcher NMS is read on a click, without starting the pinger again
 	page.Reload = func(context.Context) (*addressbook.Book, error) { return addressbook.Load(*data) }
 	server := &http.Server{
@@ -144,25 +150,6 @@ func (d *desktop) openPage() {
 	if err := openBrowser(d.url); err != nil {
 		tell(fmt.Sprintf("Cannot open the browser, the page is at %s: %v", d.url, err))
 	}
-}
-
-// isPinger tells whether a Watcher Pinger answers at the address.
-func isPinger(url string) bool {
-	client := http.Client{Timeout: 2 * time.Second}
-	response, err := client.Get(url + "api/book")
-	if err != nil {
-		return false
-	}
-	defer func() { _ = response.Body.Close() }()
-
-	var answer struct {
-		Book struct {
-			Format string `json:"format"`
-		} `json:"book"`
-	}
-	return response.StatusCode == http.StatusOK &&
-		json.NewDecoder(response.Body).Decode(&answer) == nil &&
-		answer.Book.Format == addressbook.Format
 }
 
 func defaultDataFile() string {

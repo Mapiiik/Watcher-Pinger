@@ -83,7 +83,11 @@ tooltip of its row.
 The tree can be narrowed to the **Outages**, among them the addresses that answer but lose more than 20 %, or to the
 **Losses**, the addresses that answer but lose anything at all, which is where a poor link shows.
 
-The page is served on the loopback only and answers no other host name. It receives the states as they change
+The page is served on the loopback only and answers no other host name, and only to the browser the pinger opened it
+in: the address carries a key kept in the profile of the user (`%AppData%\Watcher Pinger\page.key`, on Linux
+`~/.config/Watcher Pinger/page.key`), which the page keeps in a cookie and drops from the address. Another user of the
+same computer, on a remote desktop say, gets a page saying to open it from the icon or to start the pinger again, and
+a pinger of their own on the next free port. It receives the states as they change
 (server-sent events) and keeps in the page only what is expanded. Every page open watches what it shows.
 
 ## On a server

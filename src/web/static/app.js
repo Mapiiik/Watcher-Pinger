@@ -579,6 +579,9 @@ async function checkSession() {
     if (response.status === 401) {
       const { signIn } = await response.json();
       location.assign(`${signIn}?return=${encodeURIComponent(location.pathname + location.search)}`);
+    } else if (response.status === 403) {
+      // the key of the page is gone, the page itself says where to open it from
+      location.reload();
     }
   } catch (e) {
     // the pinger does not answer, the page stays covered
