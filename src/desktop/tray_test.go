@@ -44,8 +44,9 @@ func TestTheTooltipSumsTheNetworkUp(t *testing.T) {
 		t.Errorf("all up: %q", quiet)
 	}
 
-	out := tooltip(czech, status.Summary{Level: status.Outage, Devices: 3, Up: 1, Down: 2, Lossy: 1, AccessPointsOut: 1})
-	for _, want := range []string{"1 z 3", "mimo provoz: 1", "Neodpovídá: 2", "Ztrácí pakety: 1"} {
+	out := tooltip(czech, status.Summary{Level: status.Outage, Devices: 4, Up: 1, Down: 2, Lossy: 1, Failed: 1,
+		AccessPointsOut: 1})
+	for _, want := range []string{"1 z 4", "mimo provoz: 1", "Neodpovídá: 2", "Ztrácí pakety: 1", "Nelze pingnout: 1"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("outage: %q not in %q", want, out)
 		}

@@ -6,5 +6,11 @@ import "os/exec"
 
 // openBrowser opens the page in the default browser.
 func openBrowser(url string) error {
-	return exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
+	cmd := exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	// waited for, so that its process is let go of
+	go func() { _ = cmd.Wait() }()
+	return nil
 }

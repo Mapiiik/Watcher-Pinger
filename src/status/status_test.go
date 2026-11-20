@@ -72,3 +72,20 @@ func TestTheDevicesAreCounted(t *testing.T) {
 		t.Errorf("got %+v, want %+v", got, want)
 	}
 }
+
+// A device without an access point counts like any other, it only puts no access point out.
+func TestDevicesWithoutAnAccessPointCount(t *testing.T) {
+	book := network()
+	book.Unassigned = []addressbook.Host{
+		{Name: "Lost", IP: "10.0.9.1", Kind: addressbook.KindRouterosDevice},
+		{Name: "Moe Ann", IP: "192.0.2.9", Kind: addressbook.KindCustomer},
+	}
+	states := map[string]monitor.State{
+		"10.0.0.1": up(5, 5), "10.0.0.2": up(5, 5), "10.0.1.32": up(5, 5), "10.0.9.1": down,
+	}
+
+	s := Of(book, states)
+	if s.Devices != 4 || s.Up != 3 || s.Down != 1 || s.AccessPointsOut != 0 || s.Level != Losses {
+		t.Errorf("%+v", s)
+	}
+}

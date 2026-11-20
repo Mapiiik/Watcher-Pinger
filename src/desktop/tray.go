@@ -24,10 +24,10 @@ var icons = map[status.Level][]byte{
 
 // texts of the icon and its menu, in English or in the language of the system where there is a translation.
 type texts struct {
-	open, reload, quit          string
-	starting, noNetwork         string
-	answering, down, lossy, out string
-	reloadFailed                string
+	open, reload, quit                  string
+	starting, noNetwork                 string
+	answering, down, lossy, out, failed string
+	reloadFailed                        string
 }
 
 var english = texts{
@@ -40,6 +40,7 @@ var english = texts{
 	down:         "Not answering: %d",
 	lossy:        "Losing packets: %d",
 	out:          "Access points out: %d",
+	failed:       "Cannot be pinged: %d",
 	reloadFailed: "The data were not read, the old ones stay:",
 }
 
@@ -53,6 +54,7 @@ var czech = texts{
 	down:         "Neodpovídá: %d",
 	lossy:        "Ztrácí pakety: %d",
 	out:          "Přístupové body mimo provoz: %d",
+	failed:       "Nelze pingnout: %d",
 	reloadFailed: "Data se nenačetla, zůstávají původní:",
 }
 
@@ -82,10 +84,12 @@ func (d *desktop) run(ctx context.Context) error {
 	t := language()
 	result := make(chan error, 1)
 
+	// Before Run: the icon of Linux is registered as one that a click opens a menu of where there is no handler yet.
+	// The browser opens beside the icon, which goes on answering meanwhile.
+	systray.SetOnTapped(func() { go d.openPage() })
 	systray.Run(func() {
 		systray.SetIcon(icons[status.Starting])
 		systray.SetTooltip("Watcher Pinger\n" + t.starting)
-		systray.SetOnTapped(d.openPage)
 		open := systray.AddMenuItem(t.open, "")
 		reload := systray.AddMenuItem(t.reload, "")
 		systray.AddSeparator()
@@ -108,7 +112,7 @@ func (d *desktop) run(ctx context.Context) error {
 					systray.Quit()
 					return
 				case <-open.ClickedCh:
-					d.openPage()
+					go d.openPage()
 				case <-reload.ClickedCh:
 					// the message waits for its OK, the icon does not
 					go func() {
@@ -169,6 +173,9 @@ func tooltip(t texts, s status.Summary) string {
 		}
 		if s.Lossy > 0 {
 			lines = append(lines, fmt.Sprintf(t.lossy, s.Lossy))
+		}
+		if s.Failed > 0 {
+			lines = append(lines, fmt.Sprintf(t.failed, s.Failed))
 		}
 	}
 	return strings.Join(lines, "\n")

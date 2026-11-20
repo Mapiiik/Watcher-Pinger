@@ -39,35 +39,17 @@ type Summary struct {
 	AccessPointsOut int
 }
 
-// Of sums up the network of the book by the states of its addresses.
+// Of sums up the network of the book by the states of its addresses. The devices without an access point count as
+// well, only no access point can be out for them.
 func Of(book *addressbook.Book, states map[string]monitor.State) Summary {
 	var s Summary
 	for _, ap := range book.AccessPoints {
-		devices, down := 0, 0
-		for _, host := range ap.Hosts {
-			if host.Kind == addressbook.KindCustomer {
-				continue
-			}
-			devices++
-			state := states[host.IP]
-			switch state.Status {
-			case monitor.Up:
-				s.Up++
-				if state.Sent > 0 && (state.Sent-state.Received)*100 > HighLoss*state.Sent {
-					s.Lossy++
-				}
-			case monitor.Down:
-				s.Down++
-				down++
-			case monitor.Failed:
-				s.Failed++
-			}
-		}
-		s.Devices += devices
+		devices, down := s.count(ap.Hosts, states)
 		if devices > 0 && down == devices {
 			s.AccessPointsOut++
 		}
 	}
+	s.count(book.Unassigned, states)
 
 	switch {
 	case s.Up == 0 && s.Down == 0 && s.Failed > 0:
@@ -82,4 +64,30 @@ func Of(book *addressbook.Book, states map[string]monitor.State) Summary {
 		s.Level = AllUp
 	}
 	return s
+}
+
+// count adds the devices among the hosts to the summary and tells how many there were and how many of them do not
+// answer.
+func (s *Summary) count(hosts []addressbook.Host, states map[string]monitor.State) (devices, down int) {
+	for _, host := range hosts {
+		if host.Kind == addressbook.KindCustomer {
+			continue
+		}
+		devices++
+		state := states[host.IP]
+		switch state.Status {
+		case monitor.Up:
+			s.Up++
+			if state.Sent > 0 && (state.Sent-state.Received)*100 > HighLoss*state.Sent {
+				s.Lossy++
+			}
+		case monitor.Down:
+			s.Down++
+			down++
+		case monitor.Failed:
+			s.Failed++
+		}
+	}
+	s.Devices += devices
+	return devices, down
 }
