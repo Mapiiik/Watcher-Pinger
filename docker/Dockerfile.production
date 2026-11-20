@@ -20,12 +20,18 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
 
 # ---------- runtime ----------
 # Nothing runs in this stage (Alpine ships the CA bundle), so other platforms need no emulation. The folders for
-# the certificates and for the last network fetched come from the build stage for that reason.
+# the certificates and for the last network fetched come from the build stage for that reason, owned by the user the
+# server runs as, which needs no entry in /etc/passwd. It pings over an unprivileged ICMP socket and binds 80 and 443
+# where the container allows it, see compose.production.yaml.
 FROM alpine:latest
 
 WORKDIR /app
 
-COPY --from=build /out/ /app/
+COPY --from=build /out/watcher-pinger-server /app/
+COPY --from=build --chown=1000:1000 /out/certs /app/certs
+COPY --from=build --chown=1000:1000 /out/data /app/data
+
+USER 1000:1000
 
 EXPOSE 80 443
 

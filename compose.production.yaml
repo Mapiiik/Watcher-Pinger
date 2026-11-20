@@ -19,10 +19,15 @@ services:
       - "80:80"
       - "443:443"
 
-    # ICMP over a raw socket where the unprivileged one is not allowed; 80 and 443
-    cap_add:
-      - NET_RAW
-      - NET_BIND_SERVICE
+    # The server runs as a user of its own without any capability: the container lets it bind 80 and 443 and ping
+    # over an unprivileged ICMP socket. A raw socket (PINGER_ICMP=raw) would need user: root and cap_add: NET_RAW.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    sysctls:
+      net.ipv4.ip_unprivileged_port_start: 0
+      net.ipv4.ping_group_range: "0 2147483647"
 
 volumes:
   pinger_certs:
