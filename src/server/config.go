@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/url"
 	"os"
@@ -32,11 +33,11 @@ type Config struct {
 
 	Auth auth.Config
 
-	// NMSURL is the Watcher NMS the network is fetched from at every NMSInterval, with the key of a user of the role
-	// watcher-pinger; empty for the data file alone
-	NMSURL      string
-	NMSToken    string
-	NMSInterval time.Duration
+	// WatcherNMSURL is the Watcher NMS the network is fetched from at every WatcherNMSInterval, with the key of a user
+	// of the role watcher-pinger; empty for the data file alone
+	WatcherNMSURL      string
+	WatcherNMSToken    string
+	WatcherNMSInterval time.Duration
 	// DataFile is the file handed out by Watcher NMS: the network itself, or the copy of the last one fetched
 	DataFile string
 
@@ -55,15 +56,15 @@ func LoadConfig() (Config, error) {
 		ListenHTTP:  env.text("PINGER_LISTEN_HTTP", "0.0.0.0:80"),
 		ListenHTTPS: env.optional("PINGER_LISTEN_HTTPS", "0.0.0.0:443"),
 		// a browser sends the host in lower case, a name in capitals would turn every request away
-		Hostname:         strings.ToLower(env.text("PINGER_HOSTNAME", "")),
-		CertDir:          env.text("PINGER_CERT_DIR", "/app/certs"),
-		UseProxyProtocol: env.boolean("PINGER_USE_PROXY_PROTOCOL"),
-		ProxyAllowCIDRs:  env.list("PINGER_PROXY_ALLOW_CIDRS"),
-		NMSURL:           env.text("PINGER_NMS_URL", ""),
-		NMSToken:         env.text("PINGER_NMS_TOKEN", ""),
-		NMSInterval:      env.duration("PINGER_NMS_INTERVAL", time.Hour),
-		DataFile:         env.text("PINGER_DATA", "/app/data/watcher-pinger.json"),
-		ICMP:             icmpsocket.Kind(env.text("PINGER_ICMP", string(icmpsocket.Auto))),
+		Hostname:           strings.ToLower(env.text("PINGER_HOSTNAME", "")),
+		CertDir:            env.text("PINGER_CERT_DIR", "/app/certs"),
+		UseProxyProtocol:   env.boolean("PINGER_USE_PROXY_PROTOCOL"),
+		ProxyAllowCIDRs:    env.list("PINGER_PROXY_ALLOW_CIDRS"),
+		WatcherNMSURL:      env.text("PINGER_WATCHER_NMS_URL", ""),
+		WatcherNMSToken:    env.text("PINGER_WATCHER_NMS_TOKEN", ""),
+		WatcherNMSInterval: env.duration("PINGER_WATCHER_NMS_INTERVAL", time.Hour),
+		DataFile:           env.text("PINGER_DATA", "/app/data/watcher-pinger.json"),
+		ICMP:               icmpsocket.Kind(env.text("PINGER_ICMP", string(icmpsocket.Auto))),
 		Monitor: monitor.Options{
 			Timeout:         env.duration("PINGER_TIMEOUT", monitor.DefaultOptions.Timeout),
 			WatchedInterval: env.duration("PINGER_WATCHED_INTERVAL", monitor.DefaultOptions.WatchedInterval),
@@ -99,12 +100,13 @@ func LoadConfig() (Config, error) {
 	default:
 		problems = append(problems, fmt.Sprintf("PINGER_ICMP is not auto, unprivileged or raw: %q", cfg.ICMP))
 	}
-	if cfg.NMSURL != "" && cfg.NMSToken == "" {
-		problems = append(problems, "PINGER_NMS_TOKEN is missing: the key of a user of the role watcher-pinger")
+	if cfg.WatcherNMSURL != "" && cfg.WatcherNMSToken == "" {
+		problems = append(problems, "PINGER_WATCHER_NMS_TOKEN is missing: the key of a user of the role watcher-pinger")
 	}
 	// the key travels with every request, so only encrypted
-	if u, err := url.Parse(cfg.NMSURL); cfg.NMSURL != "" && (err != nil || u.Scheme != "https" || u.Host == "") {
-		problems = append(problems, fmt.Sprintf("PINGER_NMS_URL is not an https address: %q", cfg.NMSURL))
+	u, err := url.Parse(cfg.WatcherNMSURL)
+	if cfg.WatcherNMSURL != "" && (err != nil || u.Scheme != "https" || u.Host == "") {
+		problems = append(problems, fmt.Sprintf("PINGER_WATCHER_NMS_URL is not an https address: %q", cfg.WatcherNMSURL))
 	}
 
 	// Behind a PROXY header the address of a request is the one the header claims, so who may send it has to be
@@ -131,13 +133,41 @@ func LoadConfig() (Config, error) {
 	return cfg, nil
 }
 
+// renamed are the names variables had before 1.0.0. An old name is deprecated: it is read, with a warning, only
+// where the new one is not set.
+var renamed = map[string]string{
+	"PINGER_WATCHER_NMS_URL":      "PINGER_NMS_URL",
+	"PINGER_WATCHER_NMS_TOKEN":    "PINGER_NMS_TOKEN",
+	"PINGER_WATCHER_NMS_INTERVAL": "PINGER_NMS_INTERVAL",
+}
+
 // environment reads the variables and collects what is wrong with them.
 type environment struct {
 	problems *[]string
 }
 
+// lookup is the value of the variable and whether it is set, under its old name where only that one is.
+func (e environment) lookup(key string) (string, bool) {
+	v, set := os.LookupEnv(key)
+	if strings.TrimSpace(v) != "" {
+		return v, true
+	}
+	if old, ok := renamed[key]; ok {
+		if ov := os.Getenv(old); strings.TrimSpace(ov) != "" {
+			log.Printf("WARNING: %s is deprecated, rename it to %s", old, key)
+			return ov, true
+		}
+	}
+	return v, set
+}
+
+func (e environment) get(key string) string {
+	v, _ := e.lookup(key)
+	return strings.TrimSpace(v)
+}
+
 func (e environment) text(key, def string) string {
-	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+	if v := e.get(key); v != "" {
 		return v
 	}
 	return def
@@ -145,7 +175,7 @@ func (e environment) text(key, def string) string {
 
 // optional is like text, but a variable set empty means nothing rather than the default.
 func (e environment) optional(key, def string) string {
-	v, set := os.LookupEnv(key)
+	v, set := e.lookup(key)
 	if !set {
 		return def
 	}
@@ -153,11 +183,11 @@ func (e environment) optional(key, def string) string {
 }
 
 func (e environment) list(key string) []string {
-	return strings.Fields(os.Getenv(key))
+	return strings.Fields(e.get(key))
 }
 
 func (e environment) boolean(key string) bool {
-	v := strings.TrimSpace(os.Getenv(key))
+	v := e.get(key)
 	if v == "" {
 		return false
 	}
@@ -169,7 +199,7 @@ func (e environment) boolean(key string) bool {
 }
 
 func (e environment) integer(key string, def int) int {
-	v := strings.TrimSpace(os.Getenv(key))
+	v := e.get(key)
 	if v == "" {
 		return def
 	}
@@ -182,7 +212,7 @@ func (e environment) integer(key string, def int) int {
 }
 
 func (e environment) duration(key string, def time.Duration) time.Duration {
-	v := strings.TrimSpace(os.Getenv(key))
+	v := e.get(key)
 	if v == "" {
 		return def
 	}

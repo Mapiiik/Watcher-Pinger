@@ -29,7 +29,9 @@ func TestTheLastNetworkFetchedIsKeptForAStartWithoutNMS(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 	file := filepath.Join(t.TempDir(), "watcher-pinger.json")
-	data := newSource(Config{NMSURL: server.URL, NMSToken: "key", DataFile: file, NMSInterval: time.Hour})
+	data := newSource(Config{
+		WatcherNMSURL: server.URL, WatcherNMSToken: "key", DataFile: file, WatcherNMSInterval: time.Hour,
+	})
 
 	book, err := data.first(context.Background())
 	if err != nil || len(book.IPs()) != 1 {
@@ -54,7 +56,9 @@ func TestTheLastNetworkFetchedIsKeptForAStartWithoutNMS(t *testing.T) {
 
 // Without a copy, a start with Watcher NMS out of reach has nothing to ping and says so.
 func TestAStartWithoutNMSAndWithoutACopyFails(t *testing.T) {
-	data := newSource(Config{NMSURL: "http://127.0.0.1:1", NMSToken: "key", DataFile: filepath.Join(t.TempDir(), "none.json")})
+	data := newSource(Config{
+		WatcherNMSURL: "http://127.0.0.1:1", WatcherNMSToken: "key", DataFile: filepath.Join(t.TempDir(), "none.json"),
+	})
 
 	if _, err := data.first(context.Background()); err == nil {
 		t.Error("started with nothing")

@@ -147,9 +147,10 @@ it is for, and [`compose.production.yaml`](compose.production.yaml) runs it.
   A sign-in not set up fully stops the start rather than letting anybody in.
 - **The network** comes from [Watcher NMS](https://github.com/Mapiiik/Watcher-NMS) at
   `/api/access-points/pinger.json`, fetched with the key of a user of the role `watcher-pinger` every
-  `PINGER_NMS_INTERVAL` (an hour) and on **Reload data**. The last network fetched is kept in `PINGER_DATA`, a
-  volume, so that a start with Watcher NMS out of reach pings what was pinged before. Without `PINGER_NMS_URL` the
-  server reads `PINGER_DATA` alone.
+  `PINGER_WATCHER_NMS_INTERVAL` (an hour) and on **Reload data**. The last network fetched is kept in `PINGER_DATA`,
+  a volume, so that a start with Watcher NMS out of reach pings what was pinged before. Without
+  `PINGER_WATCHER_NMS_URL` the server reads `PINGER_DATA` alone. The names before 1.0.0, `PINGER_NMS_URL`,
+  `PINGER_NMS_TOKEN` and `PINGER_NMS_INTERVAL`, are deprecated: still read, with a warning in the log.
 
 Where it runs decides what it sees: the server pings from its place in the network, so it needs routes into all of
 it and should not stand behind anything it watches.

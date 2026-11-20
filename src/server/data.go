@@ -21,9 +21,9 @@ type source struct {
 }
 
 func newSource(cfg Config) *source {
-	s := &source{file: cfg.DataFile, interval: cfg.NMSInterval}
-	if cfg.NMSURL != "" {
-		s.nms = nms.New(cfg.NMSURL, cfg.NMSToken)
+	s := &source{file: cfg.DataFile, interval: cfg.WatcherNMSInterval}
+	if cfg.WatcherNMSURL != "" {
+		s.nms = nms.New(cfg.WatcherNMSURL, cfg.WatcherNMSToken)
 	}
 	return s
 }
