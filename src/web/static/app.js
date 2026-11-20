@@ -27,6 +27,7 @@ const TEXTS = {
     history: 'The last {0} pings: loss {1} %, round trip on average {2} ms, at most {3} ms',
     historyLost: 'The last {0} pings: none answered',
     failed: 'cannot be pinged',
+    lastLost: 'the last ping lost',
     generated: 'Data from Watcher NMS of {0} ({1})',
     staleTitle: 'The states shown are not current',
     staleText: 'The page has lost the pinger. If its window was closed, start Watcher Pinger again.',
@@ -65,6 +66,7 @@ const TEXTS = {
     history: 'Posledních {0} pingů: ztráta {1} %, odezva průměrně {2} ms, nejvýš {3} ms',
     historyLost: 'Posledních {0} pingů: žádná odpověď',
     failed: 'nelze pingnout',
+    lastLost: 'poslední ping ztracen',
     generated: 'Data z Watcher NMS ze dne {0} ({1})',
     staleTitle: 'Zobrazené stavy nejsou aktuální',
     staleText: 'Stránka ztratila spojení s pingerem. Pokud bylo jeho okno zavřené, spusťte Watcher Pinger znovu.',
@@ -345,7 +347,7 @@ function ms(value) {
 // in its tooltip.
 function paintRow(row) {
   const host = row.host;
-  const [status, rtt, , lastReply, , sent, received, average, longest] =
+  const [status, rtt, lost, lastReply, , sent, received, average, longest] =
     states.get(host.ip) || [STATUS.UNKNOWN, 0, 0, 0, 0, 0, 0, 0, 0];
   const loss = lossOf(host.ip);
   const behind = status === STATUS.DOWN && (host.node.behind || (host.kind === 'customer' && host.node.out));
@@ -355,7 +357,10 @@ function paintRow(row) {
     + (behind ? ' behind' : '');
 
   let info = '';
-  if (status === STATUS.UP) info = `${ms(rtt)} ms${loss > 0 ? ` (${text('loss', loss)})` : ''}`;
+  // an address answering until lately stays up for a ping or two lost, which have no round trip
+  if (status === STATUS.UP) {
+    info = `${lost > 0 ? text('lastLost') : `${ms(rtt)} ms`}${loss > 0 ? ` (${text('loss', loss)})` : ''}`;
+  }
   else if (status === STATUS.DOWN) info = lastReply ? text('lastReply', ago(lastReply)) : text('neverAnswered');
   else if (status === STATUS.FAILED) info = text('failed');
   row.info.textContent = info;

@@ -278,7 +278,7 @@ func TestTheStatesAreStreamedEveryOneFirst(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	request, _ := http.NewRequestWithContext(ctx, http.MethodGet, url+"/api/events", nil)
+	request, _ := http.NewRequestWithContext(ctx, http.MethodGet, url+"/api/events?viewer=page", nil)
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		t.Fatal(err)
@@ -309,7 +309,7 @@ func TestAQuietStreamStillBeats(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	request, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+host+"/api/events", nil)
+	request, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+host+"/api/events?viewer=page", nil)
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
 		t.Fatal(err)
@@ -396,5 +396,38 @@ func TestThePageIsNotFramed(t *testing.T) {
 	if response.Header.Get("Content-Security-Policy") != "frame-ancestors 'none'" ||
 		response.Header.Get("X-Frame-Options") != "DENY" {
 		t.Errorf("headers %v", response.Header)
+	}
+}
+
+// A viewer that is no ID of a page, or one with too many streams, gets none.
+func TestStreamsAreBounded(t *testing.T) {
+	_, url := serve(t, &fakeMonitor{})
+
+	for viewer, want := range map[string]int{
+		"":                      http.StatusBadRequest,
+		strings.Repeat("a", 65): http.StatusBadRequest,
+		"page%0A":               http.StatusBadRequest,
+		"../../etc":             http.StatusBadRequest,
+	} {
+		response, err := http.Get(url + "/api/events?viewer=" + viewer)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = response.Body.Close()
+		if response.StatusCode != want {
+			t.Errorf("viewer %q: status %d, want %d", viewer, response.StatusCode, want)
+		}
+	}
+
+	for range maxStreamsOfViewer {
+		stream(t, url, "page")
+	}
+	response, err := http.Get(url + "/api/events?viewer=page")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if response.StatusCode != http.StatusTooManyRequests {
+		t.Errorf("one stream too many: status %d", response.StatusCode)
 	}
 }

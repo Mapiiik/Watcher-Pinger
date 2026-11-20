@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -26,6 +27,17 @@ var static embed.FS
 
 // reloadGap is the least time between two readings asked for on a page, which go to Watcher NMS on a server.
 const reloadGap = 5 * time.Second
+
+const (
+	// maxStreams bounds the streams open at once, every one holding a connection and a ticker; a page has one.
+	maxStreams = 1000
+	// maxStreamsOfViewer bounds the streams of one page, which has one and a second while it opens it anew.
+	maxStreamsOfViewer = 4
+	// maxViewerID is longer than the UUID a page makes for itself.
+	maxViewerID = 64
+	// viewerCharacters are those of the ID a page makes for itself
+	viewerCharacters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-"
+)
 
 var errTooSoon = errors.New("the data were read anew a moment ago, try again in a few seconds")
 
@@ -46,10 +58,11 @@ type Server struct {
 	dataFile string
 
 	// streams counts the streams open for each viewer, a page open
-	streamsMu sync.Mutex
-	streams   map[string]int
-	reloadMu  sync.Mutex
-	reloaded  time.Time
+	streamsMu   sync.Mutex
+	streams     map[string]int
+	openStreams int
+	reloadMu    sync.Mutex
+	reloaded    time.Time
 
 	// Interval is how often the page is sent what changed.
 	Interval time.Duration
@@ -238,7 +251,14 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 
 	viewer := r.URL.Query().Get("viewer")
-	s.open(viewer)
+	if !validViewer(viewer) {
+		http.Error(w, "the viewer is to be an ID of the page", http.StatusBadRequest)
+		return
+	}
+	if !s.open(viewer) {
+		http.Error(w, "too many streams open", http.StatusTooManyRequests)
+		return
+	}
 	defer s.close(viewer)
 
 	states, version := s.monitor.Snapshot()
@@ -275,17 +295,36 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// open counts a stream of the viewer.
-func (s *Server) open(viewer string) {
+// open counts a stream of the viewer, unless there are too many streams, of the viewer or of all.
+func (s *Server) open(viewer string) bool {
 	s.streamsMu.Lock()
 	defer s.streamsMu.Unlock()
+	if s.streams[viewer] >= maxStreamsOfViewer || s.openStreams >= maxStreams {
+		return false
+	}
 	s.streams[viewer]++
+	s.openStreams++
+	return true
+}
+
+// validViewer takes the ID a page makes for itself, letters, digits and dashes, and nothing longer than it needs.
+func validViewer(viewer string) bool {
+	if viewer == "" || len(viewer) > maxViewerID {
+		return false
+	}
+	for _, c := range viewer {
+		if !strings.ContainsRune(viewerCharacters, c) {
+			return false
+		}
+	}
+	return true
 }
 
 // close counts a stream of the viewer off, and forgets what it watched with its last one.
 func (s *Server) close(viewer string) {
 	s.streamsMu.Lock()
 	defer s.streamsMu.Unlock()
+	s.openStreams--
 	s.streams[viewer]--
 	if s.streams[viewer] <= 0 {
 		delete(s.streams, viewer)
@@ -302,6 +341,10 @@ func (s *Server) handleWatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	viewer := r.URL.Query().Get("viewer")
+	if !validViewer(viewer) {
+		http.Error(w, "the viewer is to be an ID of the page", http.StatusBadRequest)
+		return
+	}
 
 	s.streamsMu.Lock()
 	open := s.streams[viewer] > 0
