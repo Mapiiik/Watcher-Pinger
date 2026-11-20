@@ -65,6 +65,36 @@ read changes nothing, and the page says why.
 | `-idle-interval` | `1m` | how often the other customers are pinged |
 | `-version` | | tell the version and stop |
 
+### On a file server, or a computer several people use
+
+[`scripts/Update-Watcher-Pinger.ps1`](scripts/Update-Watcher-Pinger.ps1) keeps the program and the network up to date
+in one folder, by hand or from the Task Scheduler: a shared folder of a file server the technicians take them from,
+synchronised to their computers and kept available offline, or a folder on a terminal server they run the pinger from.
+It takes the program of the latest release, checked against `SHA256SUMS`, and the network from the API of Watcher NMS
+with the key of a user of the role `watcher-pinger`, as the server does; where `PINGER_API_ALLOWED_ADDRESSES` is set,
+it lists the address of the computer. A program a pinger is running is renamed, the new one put in its place and the
+old one deleted once nobody runs it. A file that does not check out is not put in place.
+
+The task runs the script as SYSTEM, so the script and its key stay where only the administrators write, as
+`C:\Program Files\Watcher Pinger`. The program and the network go to `-Folder`, read by everybody and written by the
+administrators only too. On a file server sharing `D:\Shares\Technicians\Watcher Pinger`, in PowerShell run as
+administrator:
+
+```powershell
+cd 'C:\Program Files\Watcher Pinger'
+.\Update-Watcher-Pinger.ps1 -SetToken    # the key, read by SYSTEM and the administrators only
+
+$script = '"C:\Program Files\Watcher Pinger\Update-Watcher-Pinger.ps1"'
+$action = New-ScheduledTaskAction -Execute powershell.exe -Argument ("-NoProfile -ExecutionPolicy Bypass -File $script " +
+    '-Folder "D:\Shares\Technicians\Watcher Pinger" -WatcherNmsUrl https://nms.example.com ' +
+    '-LogFile "C:\Program Files\Watcher Pinger\update.log"')
+$trigger = New-ScheduledTaskTrigger -Once -At 00:00 -RepetitionInterval (New-TimeSpan -Hours 1)
+Register-ScheduledTask 'Watcher Pinger update' -Action $action -Trigger $trigger -User SYSTEM -RunLevel Highest
+```
+
+On a terminal server `-Folder` may be left out, the program and the network then going beside the script, and everybody
+starts a pinger of their own from there, with a page of their own. `-Prerelease` takes a release candidate too.
+
 ## How it pings
 
 Through the ICMP helper of Windows (`IcmpSendEcho2` and `Icmp6SendEcho2` in `iphlpapi.dll`, IPv4 and IPv6), which

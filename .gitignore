@@ -6,3 +6,6 @@
 
 # The configuration of a server, with its secrets
 .env
+
+# The key of Update-Watcher-Pinger.ps1, where it is run from here
+*.token
