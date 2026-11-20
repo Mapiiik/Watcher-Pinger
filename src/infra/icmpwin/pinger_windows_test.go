@@ -140,3 +140,29 @@ func TestPingsOfOneHandleWaitSideBySide(t *testing.T) {
 		t.Errorf("took %v, want them side by side", elapsed)
 	}
 }
+
+// A request that never left the machine is an error, one that went out and got nothing back is no answer.
+func TestALocalFailureIsAnError(t *testing.T) {
+	for status, want := range map[uint32]string{
+		ipSuccess:     "answer",
+		ipReqTimedOut: "nothing",
+		11003:         "nothing", // IP_DEST_HOST_UNREACHABLE
+		11050:         "error",   // IP_GENERAL_FAILURE, a Windows without a network
+		11006:         "error",   // IP_NO_RESOURCES
+	} {
+		got := "nothing"
+		switch r := statusResult(status, time.Millisecond); {
+		case r.err != nil:
+			got = "error"
+		case r.ok:
+			got = "answer"
+		}
+		if got != want {
+			t.Errorf("status %d: %s, want %s", status, got, want)
+		}
+	}
+
+	if replyStatus(0, nil, ipSuccess) != ipReqTimedOut || replyStatus(1, nil, 11050) != 11050 {
+		t.Error("the status of a reply is not read")
+	}
+}

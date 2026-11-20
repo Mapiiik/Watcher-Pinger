@@ -70,8 +70,11 @@ const (
 	// ipSuccess is the status of an echo reply from the address asked.
 	ipSuccess = 0
 
-	// ipStatusBase is where the IP_STATUS codes start. With one of them the request went out and nothing, or
-	// something other than the address asked, answered it.
+	// ipReqTimedOut is IP_REQ_TIMED_OUT, no reply in time.
+	ipReqTimedOut = 11010
+
+	// ipStatusBase is where the IP_STATUS codes start. With most of them the request went out and nothing, or
+	// something other than the address asked, answered it; localFailures did not let it out at all.
 	ipStatusBase = 11000
 	ipStatusEnd  = 12000
 
@@ -91,6 +94,31 @@ var (
 
 	errClosed = errors.New("the pinger is closed")
 )
+
+// localFailures are the IP_STATUS codes of a request that never left the machine: a Windows without a network
+// answers IP_GENERAL_FAILURE, say. They are errors, so that the pinger tells "cannot ping" rather than every address
+// down.
+var localFailures = map[uint32]string{
+	11001: "IP_BUF_TOO_SMALL",
+	11006: "IP_NO_RESOURCES",
+	11007: "IP_BAD_OPTION",
+	11008: "IP_HW_ERROR",
+	11011: "IP_BAD_REQ",
+	11018: "IP_BAD_DESTINATION",
+	11050: "IP_GENERAL_FAILURE",
+}
+
+// statusResult is the result of a request the helper gave the status of: an answer, none, or an error where the
+// request never left.
+func statusResult(status uint32, rtt time.Duration) result {
+	if status == ipSuccess {
+		return result{rtt: rtt, ok: true}
+	}
+	if name, local := localFailures[status]; local {
+		return result{err: fmt.Errorf("the ICMP helper: %s (%d)", name, status)}
+	}
+	return result{}
+}
 
 type result struct {
 	rtt time.Duration
@@ -330,7 +358,7 @@ func (s *sender) send(r *request) {
 	delete(s.pending, id)
 	var errno windows.Errno
 	if errors.As(err, &errno) && errno >= ipStatusBase && errno < ipStatusEnd {
-		r.done <- result{}
+		r.done <- statusResult(uint32(errno), 0)
 		return
 	}
 	if r.v6 {
@@ -349,25 +377,41 @@ func (s *sender) completed(context, _, _ uintptr) uintptr {
 	delete(s.pending, context)
 
 	if r.v6 {
-		count, _, _ := procIcmp6ParseReplies.Call(uintptr(unsafe.Pointer(&r.reply[0])), uintptr(len(r.reply)))
-		status := binary.LittleEndian.Uint32(r.reply[icmp6ReplyStatus:])
+		count, _, err := procIcmp6ParseReplies.Call(uintptr(unsafe.Pointer(&r.reply[0])), uintptr(len(r.reply)))
+		status := replyStatus(count, err, binary.LittleEndian.Uint32(r.reply[icmp6ReplyStatus:]))
 		from := r.reply[icmp6ReplyAddress : icmp6ReplyAddress+net.IPv6len]
-		if count == 0 || status != ipSuccess || !bytes.Equal(from, r.address6[:]) {
+		if status == ipSuccess && !bytes.Equal(from, r.address6[:]) {
 			r.done <- result{}
 			return 0
 		}
 		rtt := binary.LittleEndian.Uint32(r.reply[icmp6ReplyRTT:])
-		r.done <- result{rtt: time.Duration(rtt) * time.Millisecond, ok: true}
+		r.done <- statusResult(status, time.Duration(rtt)*time.Millisecond)
 		return 0
 	}
 
-	count, _, _ := procIcmpParseReplies.Call(uintptr(unsafe.Pointer(&r.reply[0])), uintptr(len(r.reply)))
+	count, _, err := procIcmpParseReplies.Call(uintptr(unsafe.Pointer(&r.reply[0])), uintptr(len(r.reply)))
 	echo := (*icmpEchoReply)(unsafe.Pointer(&r.reply[0]))
-	if count == 0 || echo.Status != ipSuccess || echo.Address != r.address {
+	status := replyStatus(count, err, echo.Status)
+	if status == ipSuccess && echo.Address != r.address {
 		r.done <- result{}
 		return 0
 	}
-
-	r.done <- result{rtt: time.Duration(echo.RoundTripTime) * time.Millisecond, ok: true}
+	r.done <- statusResult(status, time.Duration(echo.RoundTripTime)*time.Millisecond)
 	return 0
+}
+
+// replyStatus is the status of a reply: the one in the buffer, or without a reply parsed the one the parser left as
+// the last error, and a timeout where it left none.
+func replyStatus(count uintptr, err error, inBuffer uint32) uint32 {
+	if count > 0 {
+		return inBuffer
+	}
+	var errno windows.Errno
+	if errors.As(err, &errno) && errno >= ipStatusBase && errno < ipStatusEnd {
+		return uint32(errno)
+	}
+	if inBuffer != ipSuccess {
+		return inBuffer
+	}
+	return ipReqTimedOut
 }
