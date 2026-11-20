@@ -58,7 +58,7 @@ func run(ctx context.Context, cfg Config) error {
 		return fmt.Errorf("no network to ping: %w", err)
 	}
 
-	pinger, err := icmpsocket.Open(cfg.ICMP)
+	pinger, err := icmpsocket.Open(cfg.ICMP, icmpsocket.IPv4)
 	if err != nil {
 		return fmt.Errorf("cannot ping: %w", err)
 	}
