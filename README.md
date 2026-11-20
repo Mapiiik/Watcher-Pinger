@@ -42,6 +42,10 @@ The page has two tabs over the same tree of access points: **Network** with thei
 access point they are connected through. Both say where the network is down, so that a customer behind an outage is
 told apart from one whose router is off. The search covers both.
 
+**List** lays the access points out one below another by name instead of as a tree, each with what is its own. An
+access point behind an outage names the one where it starts and leads there. One with no addresses of its own is in
+the tree only.
+
 The page is in English, or in the first language of the browser's preferences it has a translation for (Czech so
 far).
 

@@ -1,8 +1,8 @@
 'use strict';
 
 // Two trees of the same access points: the network with its devices, and the customers by the access point they are
-// connected through. Both are kept up to date by the states the pinger sends; only what is expanded is in the page,
-// and a change repaints only the rows it touches.
+// connected through, each also as a list of the access points by name. Both are kept up to date by the states the
+// pinger sends; only what is expanded is in the page, and a change repaints only the rows it touches.
 
 const STATUS = { UNKNOWN: 0, UP: 1, DOWN: 2, FAILED: 3 };
 
@@ -11,6 +11,10 @@ const TEXTS = {
   en: {
     network: 'Network',
     customers: 'Customers',
+    layoutTree: 'Tree',
+    layoutList: 'List',
+    layoutTreeTitle: 'The access points as they hang on one another',
+    layoutListTitle: 'The access points one below another, by name',
     search: 'Search a name or IP…',
     filterAll: 'All',
     filterOutages: 'Outages',
@@ -21,6 +25,7 @@ const TEXTS = {
     unassigned: 'Without an access point',
     outageStartsHere: 'outage starts here',
     behindOutage: 'behind an outage',
+    behindOutageAt: 'behind the outage at {0}',
     neverAnswered: 'no answer yet',
     lastReply: 'last answered {0} ago',
     loss: 'loss {0} %',
@@ -52,6 +57,10 @@ const TEXTS = {
   cs: {
     network: 'Síť',
     customers: 'Zákazníci',
+    layoutTree: 'Strom',
+    layoutList: 'Seznam',
+    layoutTreeTitle: 'Přístupové body tak, jak na sebe navazují',
+    layoutListTitle: 'Přístupové body pod sebou podle názvu',
     search: 'Hledat jméno nebo IP…',
     filterAll: 'Vše',
     filterOutages: 'Výpadky',
@@ -62,6 +71,7 @@ const TEXTS = {
     unassigned: 'Bez přístupového bodu',
     outageStartsHere: 'výpadek začíná zde',
     behindOutage: 'za výpadkem',
+    behindOutageAt: 'za výpadkem u {0}',
     neverAnswered: 'zatím neodpověděl',
     lastReply: 'naposledy před {0}',
     loss: 'ztráta {0} %',
@@ -108,6 +118,15 @@ const VIEWS = {
   customers: (node) => node.customers,
 };
 
+// How the access points are laid out: as they hang on one another, or one below another by name.
+const LAYOUTS = ['tree', 'list'];
+
+// What is expanded is kept for each tab and layout apart.
+const OPEN_KEYS = Object.keys(VIEWS).flatMap((name) => [name, `${name}-list`]);
+
+// The list goes by the names as the language of the page sorts them, the numbers in them by their value.
+const COLLATOR = new Intl.Collator(LANGUAGE, { numeric: true });
+
 const MAX_RESULTS = 300;
 const STORAGE_KEY = 'watcher-pinger';
 
@@ -125,6 +144,7 @@ const states = new Map();    // ip -> [status, rtt ms, lost, last reply, since]
 const rowsByIp = new Map();  // ip -> rows showing it, dropped once out of the page
 const headers = new Set();   // nodes whose header is in the page
 let view = 'network';
+let layout = 'tree';
 let searchIps = [];
 let allIps = { network: [], customers: [] };
 
@@ -137,7 +157,7 @@ function normalize(value) {
 function makeNode(id, name, parent) {
   const node = {
     id, name, key: normalize(name), parent, children: [], devices: [], customers: [],
-    open: { network: false, customers: false }, total: { network: 0, customers: 0 },
+    open: Object.fromEntries(OPEN_KEYS.map((key) => [key, false])), total: { network: 0, customers: 0 },
     el: null, head: null, body: null, counts: null, out: false, behind: false,
   };
   (parent ? parent.children : roots).push(node);
@@ -186,21 +206,30 @@ function statusOf(ip) {
   return state ? state[0] : STATUS.UNKNOWN;
 }
 
-// Sums every subtree and decides where an outage starts: an access point is out when all its devices are down, and
-// everything below an access point that is out is behind the outage.
+function emptyTally() {
+  return {
+    counts: { network: [0, 0, 0, 0], customers: [0, 0, 0, 0] },
+    highLoss: { network: 0, customers: 0 },
+    anyLoss: { network: 0, customers: 0 },
+  };
+}
+
+// Sums every subtree, and every access point of its own for the list, and decides where an outage starts: an access
+// point is out when all its devices are down, and everything below an access point that is out is behind the outage.
 function recount() {
   for (const node of nodes) {
-    node.counts = { network: [0, 0, 0, 0], customers: [0, 0, 0, 0] };
-    node.highLoss = { network: 0, customers: 0 };
-    node.anyLoss = { network: 0, customers: 0 };
+    Object.assign(node, emptyTally());
+    node.own = emptyTally();
   }
   for (let i = nodes.length - 1; i >= 0; i--) {
     const node = nodes[i];
     for (const [name, hosts] of [['network', node.devices], ['customers', node.customers]]) {
       for (const host of hosts) {
-        node.counts[name][statusOf(host.ip)]++;
-        if (losesMuch(host.ip)) node.highLoss[name]++;
-        if (losesAny(host.ip)) node.anyLoss[name]++;
+        for (const tally of [node, node.own]) {
+          tally.counts[name][statusOf(host.ip)]++;
+          if (losesMuch(host.ip)) tally.highLoss[name]++;
+          if (losesAny(host.ip)) tally.anyLoss[name]++;
+        }
       }
     }
     node.out = node.devices.length > 0 && node.devices.every((host) => statusOf(host.ip) === STATUS.DOWN);
@@ -226,8 +255,25 @@ function recount() {
   return changed;
 }
 
+// What the header of an access point counts: its subtree in the tree, what is its own in the list.
+function tallied(node) {
+  return layout === 'list' ? node.own : node;
+}
+
+// The access point an outage a node is behind starts at: the nearest one above it that is out, but not behind.
+function outageStart(node) {
+  for (let n = node.parent; n; n = n.parent) {
+    if (n.out && !n.behind) return n;
+  }
+  return null;
+}
+
+function openKey(name = view) {
+  return layout === 'list' ? `${name}-list` : name;
+}
+
 function downIn(node, name = view) {
-  return node.counts[name][STATUS.DOWN];
+  return tallied(node).counts[name][STATUS.DOWN];
 }
 
 // The share of the last pings lost, in per cent.
@@ -250,16 +296,22 @@ function losesAny(ip) {
 
 // Whether a subtree has anything to show among the outages.
 function troubled(node, name = view) {
-  return downIn(node, name) > 0 || node.highLoss[name] > 0 || node.out;
+  return downIn(node, name) > 0 || tallied(node).highLoss[name] > 0 || node.out;
 }
 
 // Whether a subtree has anything to show among the losses.
 function losing(node, name = view) {
-  return node.anyLoss[name] > 0;
+  return tallied(node).anyLoss[name] > 0;
 }
 
-function shown(node) {
-  return node.total[view] > 0;
+// The tree shows an access point with anything in its subtree, the list one with anything of its own.
+function shown(node, name = view) {
+  return layout === 'list' ? VIEWS[name](node).length > 0 : node.total[name] > 0;
+}
+
+// The list by name, the addresses without an access point last.
+function byName(a, b) {
+  return (a.id === '') - (b.id === '') || COLLATOR.compare(a.name, b.name);
 }
 
 // --- rendering ---------------------------------------------------------------------------------------------------
@@ -274,13 +326,20 @@ function el(tag, className, content) {
 function nodeElement(node) {
   node.el = el('div', 'ap');
   node.head = el('div', 'ap-head');
-  node.head.append(el('span', 'arrow'), el('span', 'dot'), el('span', 'name', node.name), el('span', 'badges'),
-    el('span', 'note'));
+  const note = el('span', 'note');
+  node.head.append(el('span', 'arrow'), el('span', 'dot'), el('span', 'name', node.name), el('span', 'badges'), note);
   node.head.addEventListener('click', () => toggle(node));
+  // in the list the note names where the outage starts, and leads there
+  note.addEventListener('click', (event) => {
+    const start = layout === 'list' && node.behind ? outageStart(node) : null;
+    if (!start?.head?.isConnected) return;
+    event.stopPropagation();
+    flash(start.head);
+  });
   node.el.append(node.head);
   headers.add(node);
 
-  if (node.open[view]) renderBody(node);
+  if (node.open[openKey()]) renderBody(node);
   paintHead(node);
   return node.el;
 }
@@ -288,8 +347,10 @@ function nodeElement(node) {
 function renderBody(node) {
   node.body = el('div', 'ap-body');
   for (const host of VIEWS[view](node)) node.body.append(hostRow(host));
-  for (const child of node.children) {
-    if (shown(child)) node.body.append(nodeElement(child));
+  if (layout === 'tree') {
+    for (const child of node.children) {
+      if (shown(child)) node.body.append(nodeElement(child));
+    }
   }
   node.el.append(node.body);
 }
@@ -374,11 +435,12 @@ function paintRow(row) {
   else row.title = text('history', sent, loss, ms(average), ms(longest));
 }
 
-// The header of an access point counts what its tree shows of the subtree, and in both trees says whether the network
-// is down there: a customer behind an outage is no fault of their own.
+// The header of an access point counts what its tree shows of the subtree, or in the list what is its own, and in
+// both tabs says whether the network is down there: a customer behind an outage is no fault of their own. In the list,
+// where nothing shows what an access point hangs on, it names where the outage starts, and the tooltip the way there.
 function paintHead(node) {
   const head = node.head;
-  const counts = node.counts[view];
+  const counts = tallied(node).counts[view];
   const down = counts[STATUS.DOWN];
   head.className = 'ap-head'
     + (node.out ? ' out' : down > 0 ? ' some-down' : counts[STATUS.UP] > 0 ? ' all-up' : '')
@@ -386,10 +448,16 @@ function paintHead(node) {
   node.el.classList.toggle('clean', !troubled(node));
   node.el.classList.toggle('no-loss', !losing(node));
 
-  head.children[0].textContent = node.open[view] ? '▾' : '▸';
+  head.children[0].textContent = node.open[openKey()] ? '▾' : '▸';
   head.children[3].replaceChildren(...badge(counts));
-  head.children[4].textContent = node.out && !node.behind ? text('outageStartsHere')
-    : node.behind ? text('behindOutage') : '';
+  let note = '';
+  if (node.out && !node.behind) note = text('outageStartsHere');
+  else if (node.behind) {
+    const start = layout === 'list' ? outageStart(node) : null;
+    note = start ? text('behindOutageAt', start.name) : text('behindOutage');
+  }
+  head.children[4].textContent = note;
+  head.title = layout === 'list' && node.parent ? pathOf(node.parent) : '';
 }
 
 function badge(counts) {
@@ -402,8 +470,9 @@ function badge(counts) {
 }
 
 function toggle(node) {
-  node.open[view] = !node.open[view];
-  if (node.open[view]) {
+  const key = openKey();
+  node.open[key] = !node.open[key];
+  if (node.open[key]) {
     renderBody(node);
   } else if (node.body) {
     node.body.remove();
@@ -416,9 +485,14 @@ function toggle(node) {
 
 function renderTree() {
   headers.clear();
-  treeEl.replaceChildren(...roots.filter(shown).map(nodeElement));
+  const top = layout === 'list' ? nodes.filter((node) => shown(node)).sort(byName) : roots.filter((node) => shown(node));
+  treeEl.replaceChildren(...top.map(nodeElement));
+  document.body.classList.toggle('list', layout === 'list');
   for (const button of document.querySelectorAll('#views button')) {
     button.classList.toggle('active', button.dataset.view === view);
+  }
+  for (const button of document.querySelectorAll('#layouts button')) {
+    button.classList.toggle('active', button.dataset.layout === layout);
   }
   paintTotals();
 }
@@ -430,11 +504,22 @@ function switchView(name) {
   scheduleWatch();
 }
 
-// Opens the way to an access point in the given tree, or to one of its addresses, shows it and lets it flash. What is
-// looked for is shown whatever its state, so the filter goes back to everything.
+function switchLayout(name) {
+  layout = name;
+  renderTree();
+  save();
+  scheduleWatch();
+}
+
+// Opens the way to an access point in the given tab, or to one of its addresses, shows it and lets it flash. What is
+// looked for is shown whatever its state, so the filter goes back to everything. An access point with no addresses of
+// its own is in the tree only, and one with nothing for the tab in the other tab.
 function reveal(node, name, host = null) {
   view = name;
-  for (let n = node; n; n = n.parent) n.open[view] = true;
+  if (layout === 'list' && !shown(node)) layout = 'tree';
+  if (!shown(node)) view = Object.keys(VIEWS).find((other) => shown(node, other)) ?? view;
+  if (layout === 'list') node.open[openKey()] = true;
+  else for (let n = node; n; n = n.parent) n.open[openKey()] = true;
   if (filter !== 'all') setFilter('all');
   searchEl.value = '';
   showSearch('');
@@ -443,7 +528,9 @@ function reveal(node, name, host = null) {
   scheduleWatch();
 
   const row = host && [...(rowsByIp.get(host.ip) || [])].find((r) => r.host === host && treeEl.contains(r));
-  flash(row || node.head);
+  // an access point with nothing in its subtree is in neither tab
+  const target = row || node.head;
+  if (target?.isConnected) flash(target);
 }
 
 // The flash is an attribute, as a repaint sets the classes of a row anew.
@@ -517,7 +604,7 @@ function scheduleWatch() {
 function sendWatch() {
   const ips = new Set(searchIps);
   for (const node of headers) {
-    if (node.open[view] && node.head.isConnected) VIEWS[view](node).forEach((host) => ips.add(host.ip));
+    if (node.open[openKey()] && node.head.isConnected) VIEWS[view](node).forEach((host) => ips.add(host.ip));
   }
   fetch(`api/watch?viewer=${VIEWER}`, { method: 'POST', body: JSON.stringify([...ips]) }).catch(() => {});
 }
@@ -617,7 +704,7 @@ function showSearch(query) {
     if (node.key.includes(q)) {
       const row = el('div', 'result-ap');
       row.append(el('span', 'name', node.name), el('span', 'path', node.parent ? pathOf(node.parent) : ''));
-      row.addEventListener('click', () => reveal(node, shown(node) ? view : 'customers'));
+      row.addEventListener('click', () => reveal(node, view));
       rows.push(row);
     }
   }
@@ -643,8 +730,8 @@ function showSearch(query) {
 function save() {
   try {
     const open = {};
-    for (const name of Object.keys(VIEWS)) open[name] = nodes.filter((n) => n.open[name]).map((n) => n.id);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ view, open, filter }));
+    for (const key of OPEN_KEYS) open[key] = nodes.filter((n) => n.open[key]).map((n) => n.id);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ view, layout, open, filter }));
   } catch (e) {
     // a browser keeping nothing just starts on the network, collapsed
   }
@@ -654,9 +741,10 @@ function restore() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
     if (Object.hasOwn(VIEWS, saved.view)) view = saved.view;
-    for (const name of Object.keys(VIEWS)) {
-      const open = new Set(saved.open?.[name] || []);
-      nodes.forEach((n) => { n.open[name] = open.has(n.id); });
+    if (LAYOUTS.includes(saved.layout)) layout = saved.layout;
+    for (const key of OPEN_KEYS) {
+      const open = new Set(saved.open?.[key] || []);
+      nodes.forEach((n) => { n.open[key] = open.has(n.id); });
     }
     if (Object.hasOwn(FILTERS, saved.filter)) filter = saved.filter;
   } catch (e) {
@@ -695,6 +783,10 @@ for (const button of document.querySelectorAll('#views button')) {
   button.addEventListener('click', () => switchView(button.dataset.view));
 }
 
+for (const button of document.querySelectorAll('#layouts button')) {
+  button.addEventListener('click', () => switchLayout(button.dataset.layout));
+}
+
 for (const button of document.querySelectorAll('#filters button')) {
   button.addEventListener('click', () => {
     setFilter(button.dataset.filter);
@@ -705,14 +797,14 @@ for (const button of document.querySelectorAll('#filters button')) {
 // opens what the filter shows; the outages may spread over most of the tree, so they are shown without what answers
 expandEl.addEventListener('click', () => {
   if (filter === 'all') setFilter('outages');
-  for (const node of nodes) node.open[view] = filter === 'loss' ? losing(node) : troubled(node);
+  for (const node of nodes) node.open[openKey()] = filter === 'loss' ? losing(node) : troubled(node);
   renderTree();
   save();
   scheduleWatch();
 });
 
 document.getElementById('collapse-all').addEventListener('click', () => {
-  nodes.forEach((n) => { n.open[view] = false; });
+  nodes.forEach((n) => { n.open[openKey()] = false; });
   renderTree();
   save();
   scheduleWatch();
@@ -739,13 +831,13 @@ async function readBook(first) {
   document.querySelector('#stale [data-text="staleText"]').textContent =
     text(hosted ? 'staleTextHosted' : 'staleText');
 
-  const open = Object.fromEntries(Object.keys(VIEWS).map(
-    (name) => [name, new Set(nodes.filter((n) => n.open[name]).map((n) => n.id))]));
+  const open = Object.fromEntries(OPEN_KEYS.map(
+    (key) => [key, new Set(nodes.filter((n) => n.open[key]).map((n) => n.id))]));
   buildModel(book);
   if (first) {
     restore();
   } else {
-    for (const name of Object.keys(VIEWS)) nodes.forEach((n) => { n.open[name] = open[name].has(n.id); });
+    for (const key of OPEN_KEYS) nodes.forEach((n) => { n.open[key] = open[key].has(n.id); });
   }
   recount();
   renderTree();
@@ -791,6 +883,7 @@ async function showSession() {
 
 async function start() {
   document.querySelectorAll('[data-text]').forEach((element) => { element.textContent = text(element.dataset.text); });
+  document.querySelectorAll('[data-title]').forEach((element) => { element.title = text(element.dataset.title); });
   searchEl.placeholder = text('search');
   document.documentElement.lang = LANGUAGE;
 

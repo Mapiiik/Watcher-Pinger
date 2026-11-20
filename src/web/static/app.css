@@ -195,6 +195,8 @@ footer a { color: inherit; }
 .badges .down { color: var(--down); font-weight: 600; }
 .note { font-size: 12px; font-weight: 600; color: var(--down); }
 .ap-head.behind .note { color: var(--behind); font-weight: 400; }
+/* in the list the note of an access point behind an outage leads to where it starts */
+.list .ap-head.behind .note { cursor: pointer; text-decoration: underline dotted; }
 
 .kind { color: var(--muted); font-size: 11px; }
 .contact { color: var(--lossy); font-weight: 700; }
