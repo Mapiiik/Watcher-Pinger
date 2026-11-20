@@ -113,6 +113,8 @@ func newOIDCFlow(ctx context.Context, cfg Config) (*oidcFlow, error) {
 	}
 	if len(f.groups) > 0 {
 		f.oauth.Scopes = append(f.oauth.Scopes, "groups")
+	} else {
+		log.Println("OIDC: PINGER_OIDC_GROUPS is empty, whoever the provider lets through sees the network")
 	}
 	f.mux.HandleFunc("GET "+loginPath, f.login)
 	f.mux.HandleFunc("GET "+callbackPath, f.callback)

@@ -83,6 +83,10 @@ const (
 
 	// spillAt is how many requests may wait for the first thread before the others take some.
 	spillAt = 16
+
+	// helperGrace is how much longer than its timeout a request waits for the helper, which answers every one by
+	// then; one it never answers is no answer rather than a worker of the monitor stuck for good.
+	helperGrace = 2 * time.Second
 )
 
 var (
@@ -269,11 +273,15 @@ func (p *Pinger) Ping(ip net.IP, timeout time.Duration) (time.Duration, bool, er
 	}
 	_ = windows.SetEvent(s.wake)
 
+	timer := time.NewTimer(timeout + helperGrace)
+	defer timer.Stop()
 	select {
 	case res := <-r.done:
 		return res.rtt, res.ok, res.err
 	case <-s.stopped:
 		return 0, false, errClosed
+	case <-timer.C:
+		return 0, false, nil
 	}
 }
 
