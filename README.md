@@ -14,7 +14,8 @@ too, for everyone who signs in to watch the network online.
 ## Using it
 
 1. Download `watcher-pinger.exe` from the [releases](https://github.com/Mapiiik/Watcher-Pinger/releases) (`watcher-pinger`
-   for Linux, see below).
+   for Linux, see below). `SHA256SUMS` beside it has the checksums, and
+   `gh attestation verify watcher-pinger.exe -R Mapiiik/Watcher-Pinger` shows it was built by the CI of this repository.
 2. In Watcher NMS, **Access Points → Pinger → Download (.json)** gives `watcher-pinger.json`; put it next to
    `watcher-pinger.exe` (a synchronised folder kept available offline does well).
 3. Run `watcher-pinger.exe`. The page opens in the default browser, and an icon in the notification area says how
@@ -123,7 +124,8 @@ it and should not stand behind anything it watches.
 
 The CI lints and tests every push, the ICMP helper on Windows itself and both ICMP sockets with the right to them, keeps
 the program it builds as an artifact of the run and pushes the image of the server. A tag, a bare version as the
-other Watcher applications have it (`1.0.0`, `1.1.0-RC1` for a prerelease), publishes the program as a release.
+other Watcher applications have it (`1.0.0`, `1.1.0-RC1` for a prerelease), publishes the program as a release, with
+its checksums and an attestation of the build; the `.exe` carries the version in its properties.
 
 There is no need for Go on the machine, a container does:
 

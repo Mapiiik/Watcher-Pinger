@@ -94,6 +94,11 @@ jobs:
       - test
       - windows
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # the attestation of a release
+      id-token: write
+      attestations: write
 
     outputs:
       version: ${{ steps.version.outputs.version }}
@@ -116,6 +121,17 @@ jobs:
         run: |
           echo "version=$(git describe --tags --always --dirty)" >> "$GITHUB_OUTPUT"
 
+      # the version into the properties of the .exe: the number of the tag as the file version, 0.0.0.0 without one,
+      # and the whole of it as the product version
+      - name: Windows resource
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        working-directory: src/desktop
+        run: |
+          number=$(echo "$VERSION" | grep -oE '^v?[0-9]+(\.[0-9]+){0,3}' | sed 's/^v//' || true)
+          go run github.com/tc-hib/go-winres@v0.3.3 make --in winres/winres.json --arch amd64 --out rsrc \
+            --file-version "${number:-0.0.0.0}" --product-version "$VERSION"
+
       # a console program on both; on Windows its manifest gives it no console when started from Explorer
       - name: Build
         env:
@@ -125,6 +141,16 @@ jobs:
             -o dist/watcher-pinger.exe ./src/desktop
           GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
             -o dist/watcher-pinger ./src/desktop
+          cd dist && sha256sum watcher-pinger.exe watcher-pinger > SHA256SUMS
+
+      # a release says where its programs were built: gh attestation verify watcher-pinger.exe -R Mapiiik/Watcher-Pinger
+      - name: Attest
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            dist/watcher-pinger.exe
+            dist/watcher-pinger
 
       - name: Upload
         uses: actions/upload-artifact@v7
@@ -133,6 +159,7 @@ jobs:
           path: |
             dist/watcher-pinger.exe
             dist/watcher-pinger
+            dist/SHA256SUMS
           if-no-files-found: error
 
   ##########################################################################
@@ -223,7 +250,7 @@ jobs:
           if [[ "$TAG" == *-* ]]; then
             prerelease=(--prerelease)
           fi
-          gh release create "$TAG" watcher-pinger.exe watcher-pinger \
+          gh release create "$TAG" watcher-pinger.exe watcher-pinger SHA256SUMS \
             --repo "$GITHUB_REPOSITORY" \
             --title "Watcher Pinger $TAG" \
             --generate-notes \
