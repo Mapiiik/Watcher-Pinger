@@ -107,6 +107,7 @@ func main() {
 	page := web.New(book, pings, *data)
 	// only the browser this pinger opens gets in, not another user of the same computer
 	page.Key = key
+	page.Version = version
 	// a new file from Watcher NMS is read on a click, without starting the pinger again
 	page.Reload = func(context.Context) (*addressbook.Book, error) { return addressbook.Load(*data) }
 	server := &http.Server{

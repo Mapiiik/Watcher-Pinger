@@ -104,6 +104,20 @@ func TestThePageAndTheBookAreServed(t *testing.T) {
 	}
 }
 
+// The page tells the version it runs, "dev" for a build that was given none, and where its source is.
+func TestThePageIsToldTheVersionAndTheSource(t *testing.T) {
+	for given, want := range map[string]string{"1.0.0-RC1": `"version":"1.0.0-RC1"`, "": `"version":"dev"`} {
+		page := New(&addressbook.Book{Format: addressbook.Format, Version: 1}, &fakeMonitor{}, "data.json")
+		page.Version = given
+		recorder := httptest.NewRecorder()
+		page.Handler(nil, nil).ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/book", nil))
+		body := recorder.Body.String()
+		if !strings.Contains(body, want) || !strings.Contains(body, `"source":"`+Repository+`"`) {
+			t.Errorf("%q: want %s and the repository in %.300q", given, want, body)
+		}
+	}
+}
+
 // A page of another site that had its name point to the loopback is not answered.
 func TestAnotherHostIsRefused(t *testing.T) {
 	_, url := serve(t, &fakeMonitor{})

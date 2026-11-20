@@ -39,6 +39,10 @@ const (
 	viewerCharacters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-"
 )
 
+// Repository is where the source of Watcher Pinger is, offered on the page as the AGPL asks of a program used over a
+// network.
+const Repository = "https://github.com/Mapiiik/Watcher-Pinger"
+
 var errTooSoon = errors.New("the data were read anew a moment ago, try again in a few seconds")
 
 // Monitor is what the page needs of the monitor.
@@ -79,6 +83,8 @@ type Server struct {
 	Hosted bool
 	// Key, where set, lets in only the browser the pinger opened the page in, see keyed.
 	Key string
+	// Version is the version of the program, told on the page beside the link to its source.
+	Version string
 }
 
 // New serves the given book and the states its monitor keeps.
@@ -165,12 +171,18 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleBook(w http.ResponseWriter, _ *http.Request) {
+	version := s.Version
+	if version == "" {
+		version = "dev"
+	}
 	writeJSON(w, struct {
 		DataFile  string            `json:"dataFile"`
 		Book      *addressbook.Book `json:"book"`
 		CanReload bool              `json:"canReload"`
 		Hosted    bool              `json:"hosted"`
-	}{s.dataFile, s.book.Load(), s.Reload != nil, s.Hosted})
+		Version   string            `json:"version"`
+		Source    string            `json:"source"`
+	}{s.dataFile, s.book.Load(), s.Reload != nil, s.Hosted, version, Repository})
 }
 
 // handleReload reads the data anew, not twice within reloadGap. Data that cannot be read change nothing, and the page

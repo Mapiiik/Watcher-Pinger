@@ -27,7 +27,11 @@
 
 * { box-sizing: border-box; }
 
+/* the footer at the bottom of the window where the tree is short, after it where it is long */
 body {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
   margin: 0;
   background: var(--bg);
   color: var(--fg);
@@ -148,7 +152,10 @@ button .down { color: var(--down); font-weight: 600; }
 #reload-result.failed { color: var(--down); }
 #session { margin-left: auto; color: var(--muted); white-space: nowrap; }
 #session a { color: inherit; }
-main { padding: 0 16px 24px; }
+main { flex: 1 0 auto; padding: 0 16px 24px; }
+main[hidden] { display: none; }
+footer { padding: 8px 16px; text-align: right; color: var(--muted); font-size: 12px; }
+footer a { color: inherit; }
 
 .ap-head, .host, .result-ap {
   display: flex;

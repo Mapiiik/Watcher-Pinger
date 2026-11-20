@@ -74,6 +74,7 @@ func run(ctx context.Context, cfg Config) error {
 
 	page := web.New(book, pings, data.label())
 	page.Hosted = true
+	page.Version = version
 	page.Reload = data.load
 	go data.refresh(ctx, page)
 	page.Who = func(r *http.Request) string {

@@ -38,6 +38,8 @@ const TEXTS = {
     reloaded: 'Read anew at {0}.',
     reloadFailed: 'The data were not read, the old ones stay: {0}',
     signOut: 'Sign out',
+    sourceCode: 'Source code',
+    version: 'Version',
     copied: 'Copied: {0}',
     noResults: 'Nothing found.',
     tooMany: 'The first {0} addresses are shown.',
@@ -77,6 +79,8 @@ const TEXTS = {
     reloaded: 'Načteno znovu v {0}.',
     reloadFailed: 'Data se nenačetla, zůstávají původní: {0}',
     signOut: 'Odhlásit',
+    sourceCode: 'Zdrojový kód',
+    version: 'Verze',
     copied: 'Zkopírováno: {0}',
     noResults: 'Nic nenalezeno.',
     tooMany: 'Zobrazeno prvních {0} adres.',
@@ -726,9 +730,11 @@ setInterval(() => {
 // Reads the data and builds the trees. Data read anew keep what was expanded and what is searched for.
 async function readBook(first) {
   const response = await fetch('api/book');
-  const { book, dataFile, canReload, hosted } = await response.json();
+  const { book, dataFile, canReload, hosted, version, source } = await response.json();
   document.getElementById('generated').textContent =
     text('generated', new Date(book.generated).toLocaleString(), dataFile);
+  document.getElementById('version').textContent = version;
+  document.getElementById('source').href = source;
   document.getElementById('reload').hidden = !canReload;
   document.querySelector('#stale [data-text="staleText"]').textContent =
     text(hosted ? 'staleTextHosted' : 'staleText');
