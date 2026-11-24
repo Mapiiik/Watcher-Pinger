@@ -127,7 +127,8 @@ a pinger of their own on the next free port. It receives the states as they chan
 ## On a server
 
 `watcher-pinger-server` is the same pinger and page for Linux, as the image `ghcr.io/mapiiik/watcher-pinger`
-(`latest` from `main`, the version and its major number from a tag). It pings over an unprivileged ICMP socket where
+(`main` from `main`, and from a tag the version, with its major number and `latest` while it is the newest release;
+`compose.production.yaml` runs `1`). It pings over an unprivileged ICMP socket where
 the system allows it in `net.ipv4.ping_group_range`, as Docker does, and over a raw one otherwise, which needs
 `NET_RAW`; `PINGER_ICMP` picks one for good. An unprivileged socket gets only its own replies, while a raw one sees
 those of every program on the machine and lets only echo replies through. Both families are pinged, each over a

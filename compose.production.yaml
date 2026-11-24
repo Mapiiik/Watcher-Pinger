@@ -3,7 +3,7 @@
 # PINGER_USE_PROXY_PROTOCOL and PINGER_PROXY_ALLOW_CIDRS; see the README.
 services:
   watcher-pinger:
-    image: ghcr.io/mapiiik/watcher-pinger:latest
+    image: ghcr.io/mapiiik/watcher-pinger:1
     restart: unless-stopped
     stop_grace_period: 60s
 
